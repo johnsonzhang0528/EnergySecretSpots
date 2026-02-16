@@ -1,0 +1,277 @@
+---
+import Layout from '../layouts/Layout.astro';
+import SpotCard from '../components/SpotCard.astro';
+import NativeAdCard from '../components/NativeAdCard.astro';
+import spots from '../data/surf_spots.json';
+import { Image } from 'astro:assets';
+import heroBg from '../assets/hero-bg-surf.jpg';
+import { getValidSpots } from '../utils/filterSpots';
+import { getAdRotator } from '../utils/adManager';
+
+// Initialize Ad Rotator
+const adRotator = getAdRotator();
+
+// Simple types for the dataset
+type Spot = {
+	name: string;
+	city: string;
+	area: string;
+	difficulty: string;
+	bottom_type: string;
+    best_swell: string;
+	description: string;
+    tags?: string[];
+    lat: number;
+    lng: number;
+};
+
+// 篩選熱門精選浪點 (優先選擇資料較完整、有 features 且 difficulty 明確的點)
+// 這裡簡單模擬：取 tag 最多或描述最長的浪點
+const validSpots = getValidSpots(spots);
+const surfSpots = (validSpots as Spot[])
+    .sort((a, b) => (b.tags?.length || 0) - (a.tags?.length || 0))
+    .slice(0, 8); // 取前 8 個 (配合 3 欄佈局 + 1 個廣告 = 9 格)
+
+// 動態計算熱門縣市
+const cityStats = validSpots.reduce((acc, spot) => {
+  acc[spot.city] = (acc[spot.city] || 0) + 1;
+  return acc;
+}, {} as Record<string, number>);
+
+const popularCities = Object.entries(cityStats)
+  .sort(([, countA], [, countB]) => countB - countA)
+  .map(([city, count]) => ({ city, count }));
+
+// Logic: Determine Seasonal Topic (pSEO Internal Linking)
+const currentMonth = new Date().getMonth() + 1;
+const currentYear = new Date().getFullYear();
+const isWinter = currentMonth >= 10 || currentMonth <= 3;
+const seasonalTopic = isWinter 
+    ? { 
+        name: '冬季東北季風', 
+        desc: '強勁東北風帶來的穩定浪況',
+        url: '/topic/best-winter', 
+        icon: '🌬️',
+        color: 'from-blue-600 to-cyan-500 border-cyan-400/30' 
+      }
+    : { 
+        name: '夏季西南氣流', 
+        desc: '適合新手與長板的柔和浪況', 
+        url: '/topic/summer-vibes', 
+        icon: '☀️',
+        color: 'from-orange-500 to-amber-500 border-orange-400/30'
+      };
+
+// Schema.org: Sitelinks Search Box
+const websiteSchema = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "Outdoor Fun",
+  "url": Astro.site ? Astro.site.origin : "https://surftaiwan.tw",
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": {
+      "@type": "EntryPoint",
+      "urlTemplate": `${Astro.site ? Astro.site.origin : "https://surftaiwan.tw"}/search?q={search_term_string}`
+    },
+    "query-input": "required name=search_term_string"
+  }
+};
+
+// Global Schema
+const homeSchema = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "name": "Outdoor Fun 衝浪情報 (Surf Taiwan)",
+      "url": Astro.site?.origin,
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": `${Astro.site?.origin}/search?q={search_term_string}`
+        },
+        "query-input": "required name=search_term_string"
+      }
+    },
+    {
+      "@type": "Organization",
+      "name": "Outdoor Fun",
+      "alternateName": ["Outdoor Fun 衝浪", "Surf Taiwan"],
+      "url": Astro.site,
+      "description": "提供全台灣衝浪地圖、即時浪況預報、新手教學與衝浪店資訊的專業情報網站。",
+      "logo": {
+        "@type": "ImageObject",
+        "url": `${Astro.site}favicon.svg`
+      }
+    },
+    {
+      "@type": "WebPage",
+      "name": "Outdoor Fun 首頁",
+      "url": Astro.site,
+      "description": "全台衝浪與戶外運動情報，收錄超過 200 個浪點、即時海況與天氣預報。"
+    }
+  ]
+};
+---
+
+<Layout 
+	title="Outdoor Fun 衝浪地圖 | 全台浪點與即時預報 (Surf Taiwan)"
+    omitSuffix={true}
+>
+    <!-- Inject Schema -->
+    <script type="application/ld+json" slot="head" set:html={JSON.stringify(homeSchema)}></script>
+    <script type="application/ld+json" slot="head" set:html={JSON.stringify(websiteSchema)}></script>
+    
+    <div class="relative bg-slate-900 -mt-[64px] pt-[64px]">
+        <div class="absolute inset-0 overflow-hidden">
+            <Image 
+                src={heroBg} 
+                alt="Surf Taiwan 衝浪地圖"
+                class="absolute inset-0 w-full h-full object-cover opacity-60 mix-blend-overlay z-0"
+                width={1920}
+                height={1080}
+                loading="eager"
+                fetchpriority="high"
+                quality={80}
+            />
+            <div class="absolute inset-0 bg-gradient-to-b from-blue-900/40 via-transparent to-stone-50/10"></div>
+        </div>
+
+        <div class="container mx-auto px-4 py-20 md:py-32 relative z-10 text-center">
+            <span class="inline-block py-1 px-3 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/30 text-xs font-bold tracking-wider mb-6 backdrop-blur-sm">
+                OUTDOORFUN.COM.TW • SINCE 2005
+            </span>
+            <h1 class="text-4xl md:text-6xl font-extrabold text-white mb-6 tracking-tight drop-shadow-lg">
+                尋找你的<br/><span class="text-sky-400">完美浪點</span>
+            </h1>
+            <p class="text-lg md:text-xl text-stone-200 max-w-2xl mx-auto mb-10 leading-relaxed drop-shadow-md">
+                收錄全台 {spots.length} 個精選熱門浪點，結合即時海象與預報分析，
+                <br class="hidden md:inline"/>隨時掌握最佳下水時機。
+            </p>
+            <div class="flex justify-center gap-4">
+                <a href="/search" class="w-full md:w-auto bg-sky-700 text-white px-8 py-4 rounded-xl font-bold hover:bg-sky-800 transition shadow-lg shadow-sky-900/50 active:scale-95 transform duration-100 inline-flex items-center justify-center gap-2">
+                    <span>🏄</span> 搜尋浪點
+                </a>
+            </div>
+
+            {/* Seasonal Featured Widget - Internal Linking for pSEO */}
+            <div class="mt-8 flex justify-center">
+                <a href={seasonalTopic.url} class={`
+                    group relative inline-flex items-center gap-4 px-6 py-3 rounded-2xl 
+                    bg-gradient-to-r ${seasonalTopic.color} text-white 
+                    shadow-xl shadow-black/20 hover:scale-105 transition-all duration-300
+                    border bg-opacity-90 backdrop-blur-md overflow-hidden ring-1 ring-white/20
+                `}>
+                    <div class="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    <span class="text-3xl filter drop-shadow-md group-hover:rotate-12 transition-transform duration-300">{seasonalTopic.icon}</span>
+                    <div class="text-left">
+                        <div class="text-[10px] flex items-center gap-1.5 font-bold tracking-widest opacity-90 uppercase text-white/90">
+                            <span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]"></span>
+                            <span>SEASONAL PICK</span>
+                        </div>
+                        <div class="font-extrabold text-base md:text-lg leading-tight text-white drop-shadow-sm">
+                            {currentYear} {seasonalTopic.name}地圖 &rarr;
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <section class="container mx-auto px-4 -mt-16 mb-16 relative z-20">
+        <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8 border border-stone-100 relative group">
+            
+            <div class="flex justify-between items-end mb-6">
+                <div>
+                    <h2 class="text-sm font-bold text-stone-700 uppercase tracking-wider">熱門衝浪縣市</h2>
+                    <p class="text-2xl font-bold text-stone-900 mt-1">你想去哪裡衝浪？</p>
+                </div>
+                <a href="/search" class="hidden md:block text-sky-800 text-sm font-bold hover:underline">看完整地圖 &rarr;</a>
+            </div>
+            
+            {/* 🟢 [UX FIX] Mobile Scroll Container */}
+            <div class="relative">
+                {/* 1. 捲動容器: 改用 grid-flow-col 讓排列更整齊，並調整 gap */}
+                <div class="flex overflow-x-auto pb-4 gap-3 md:grid md:grid-cols-4 lg:grid-cols-6 md:overflow-visible md:pb-0 snap-x scrollbar-hide -mx-2 px-2 md:mx-0 md:px-0">
+                    {popularCities.map(({ city, count }) => (
+                        <a 
+                            href={`/city/${city}`} 
+                            /* 🟢 寬度優化: 手機版設為 w-[26%] (約3.5個)，讓第4個露出一半，暗示可捲動 */
+                            class="snap-start shrink-0 w-[26%] md:w-auto flex flex-col items-center justify-center p-3 md:p-4 rounded-xl bg-stone-50 hover:bg-emerald-50 hover:text-emerald-800 transition-all duration-200 group/btn border border-stone-100 hover:border-emerald-200 hover:shadow-md active:scale-95"
+                        >
+                            <span class="w-8 h-8 rounded-full bg-white text-base md:text-lg flex items-center justify-center mb-2 shadow-sm group-hover/btn:scale-110 transition-transform">📍</span>
+                            <span class="font-bold text-stone-800 text-sm md:text-base group-hover/btn:text-emerald-800 whitespace-nowrap">{city}</span>
+                            <span class="text-[10px] md:text-xs text-stone-700 mt-1 whitespace-nowrap">{count} 個浪點</span>
+                        </a>
+                    ))}
+                    
+                    {/* 查看更多的「假卡片」(Optional, 增加點擊入口) */}
+                    <a href="/search" class="snap-start shrink-0 w-[26%] md:hidden flex flex-col items-center justify-center p-3 rounded-xl border-2 border-dashed border-stone-300 text-stone-600 hover:text-emerald-700 hover:border-emerald-300 transition-colors">
+                        <span class="text-xl mb-1">➔</span>
+                        <span class="text-xs font-bold">更多</span>
+                    </a>
+                </div>
+
+                {/* 2. 漸層遮罩 (Visual Hint): 右側淡淡的白霧，暗示還有內容 */}
+                <div class="absolute right-0 top-0 bottom-4 w-12 bg-gradient-to-l from-white to-transparent pointer-events-none md:hidden"></div>
+            </div>
+            
+            <div class="mt-4 md:hidden text-center border-t border-stone-100 pt-4">
+                 <a href="/search" class="text-emerald-700 text-sm font-bold flex items-center justify-center gap-1 active:opacity-70">
+                    探索所有地區 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>
+                 </a>
+            </div>
+        </div>
+    </section>
+
+    {/* Featured Spots Grid */}
+    <section class="container mx-auto px-4 mb-20">
+         <div class="flex items-center justify-between mb-8">
+            <h2 class="text-2xl font-bold text-stone-800 flex items-center gap-2">
+                <span class="text-3xl">🔥</span> 熱門精選浪點
+            </h2>
+            <a href="/search" class="text-sky-700 font-bold hover:text-sky-800 flex items-center gap-1 text-sm md:text-base transition-colors">
+                瀏覽所有浪點 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>
+            </a>
+         </div>
+         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {surfSpots.map((spot, index) => (
+                <>
+                    <SpotCard spot={spot} />
+                    {/* Insert Native Ad after the 6th item */}
+                    {index === 5 && (
+                        <div class="h-full">
+                            <NativeAdCard adData={adRotator.next()} />
+                        </div>
+                    )}
+                </>
+            ))}
+         </div>
+    </section>
+
+    {/* Friendly Links / Partner Sites */}
+    <section class="container mx-auto px-4 mb-20 bg-slate-50 rounded-xl p-8 border border-slate-100">
+      <h2 class="text-xl font-bold text-stone-800 mb-6 flex items-center gap-2">
+        <span class="text-2xl">🤝</span> 合作夥伴與推薦連結
+      </h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <a 
+          href="https://www.outdoorcampingworld.com/?utm_source=surf_site&utm_medium=home_partner" 
+          target="_blank"
+          rel="noopener noreferrer"
+          class="flex items-center gap-4 bg-white p-5 rounded-xl shadow-sm hover:shadow-md transition-all hover:-translate-y-1 border border-stone-100 group"
+        >
+          <div class="h-14 w-14 bg-blue-50/80 rounded-full flex items-center justify-center text-3xl group-hover:scale-110 transition-transform shadow-inner">
+            ⛺
+          </div>
+          <div>
+            <h3 class="font-bold text-stone-800 text-lg group-hover:text-blue-600 transition-colors">Outdoor Camping World</h3>
+            <p class="text-stone-500 text-sm mt-1">全台最完整的露營區指南，找營地、看評價、查天氣。</p>
+          </div>
+        </a>
+      </div>
+    </section>
+
+</Layout>

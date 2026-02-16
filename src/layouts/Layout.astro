@@ -1,0 +1,490 @@
+---
+// src/layouts/Layout.astro
+
+import MobileHeader from '../components/MobileHeader.astro';
+import BackToTop from '../components/BackToTop.astro';
+import { ClientRouter } from 'astro:transitions';
+
+interface Props {
+title: string;
+description?: string;
+noindex?: boolean;
+    preloadImage?: string;
+    omitSuffix?: boolean; // 🟢 [NEW] 控制是否省略標題後綴
+    image?: string;       // 🟢 [NEW] 自訂 OG Image
+    hideBottomNav?: boolean; // 🟢 [NEW] 特定頁面隱藏底部導航
+    geo?: {               // 🟢 [NEW] Local SEO
+        lat?: number;
+        lng?: number;
+        placename?: string;
+    };
+}
+
+const { 
+    title, 
+    description = "Outdoor Fun 衝浪地圖 (Surf Taiwan)。收錄全台熱門浪點資訊、即時浪況預報、潮汐表，以及專業的衝浪裝備導購建議。",
+    noindex = false,
+    preloadImage,
+    omitSuffix = false,
+    image,
+    hideBottomNav = false,
+    geo
+} = Astro.props;
+
+// 🟢 [Local SEO] Region Code Mapping
+const regionMap: Record<string, string> = {
+    '宜蘭縣': 'TW-YIL', '新北市': 'TW-NWT', '基隆市': 'TW-KEE', '臺北市': 'TW-TPE', '台北市': 'TW-TPE',
+    '桃園市': 'TW-TAO', '新竹縣': 'TW-HSQ', '新竹市': 'TW-HSZ', '苗栗縣': 'TW-MIA',
+    '臺中市': 'TW-TXG', '台中市': 'TW-TXG', '彰化縣': 'TW-CHA', '雲林縣': 'TW-YUN',
+    '嘉義縣': 'TW-CYQ', '嘉義市': 'TW-CYI', '臺南市': 'TW-TNN', '台南市': 'TW-TNN',
+    '高雄市': 'TW-KHH', '屏東縣': 'TW-PIF', '花蓮縣': 'TW-HUA', '臺東縣': 'TW-TTT', '台東縣': 'TW-TTT',
+    '澎湖縣': 'TW-PEN', '金門縣': 'TW-KIN', '連江縣': 'TW-LIE'
+};
+
+const geoRegion = geo?.placename ? regionMap[geo.placename] : undefined;
+
+// 🟢 [SEO Logic] Title & Meta Description Truncation
+const SITE_NAME_SUFFIX = " | Outdoor Fun";
+const MAX_TITLE_LENGTH = 60;
+const MAX_DESC_LENGTH = 160;
+
+// 1. Title Construction & Truncation
+let fullTitle = omitSuffix ? title : `${title}${SITE_NAME_SUFFIX}`;
+if (fullTitle.length > MAX_TITLE_LENGTH) {
+    if (!omitSuffix && title.length <= MAX_TITLE_LENGTH) {
+        fullTitle = title;
+    } else {
+        fullTitle = fullTitle.substring(0, MAX_TITLE_LENGTH - 3) + "...";
+    }
+}
+
+// 2. Description Truncation
+let metaDescription = description;
+if (metaDescription.length > MAX_DESC_LENGTH) {
+    metaDescription = metaDescription.substring(0, MAX_DESC_LENGTH - 3) + "...";
+}
+
+const canonicalURL = new URL(Astro.url.pathname, Astro.site || 'https://surftaiwan.tw');
+const socialImageURL = new URL(image || '/images/hero-bg-surf.jpg', Astro.url);
+const currentPath = Astro.url.pathname;
+const isActive = (path: string) => {
+    const normalize = (p: string) => p.endsWith('/') && p.length > 1 ? p.slice(0, -1) : p;
+    const current = normalize(currentPath);
+    const target = normalize(path);
+    return current === target || (target !== '/' && current.startsWith(target + '/'));
+};
+---
+
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="generator" content={Astro.generator} />
+
+    <!-- 🟢 [Local SEO] Geo Tags -->
+    {geo?.placename && <meta name="geo.placename" content={geo.placename} />}
+    {geoRegion && <meta name="geo.region" content={geoRegion} />}
+    {geo?.lat && geo?.lng && (
+        <>
+            <meta name="geo.position" content={`${geo.lat};${geo.lng}`} />
+            <meta name="ICBM" content={`${geo.lat}, ${geo.lng}`} />
+        </>
+    )}
+
+    <!-- 🟢 [Performance] Preconnects -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://maps.googleapis.com">
+    <link rel="preconnect" href="https://www.outdoorcampingworld.com">
+
+		<!-- PWA Meta Tags -->
+		<link rel="manifest" href="/manifest.json">
+		<meta name="theme-color" content="#0ea5e9">
+        <meta name="mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="default">
+		<meta name="apple-mobile-web-app-title" content="Surf Taiwan">
+
+		<title>{fullTitle}</title>
+<meta name="title" content={fullTitle} />
+<meta name="description" content={metaDescription} />
+
+        <link rel="preconnect" href="https://www.googletagmanager.com">
+        <link rel="preconnect" href="https://www.conn.tw">
+        <link rel="preconnect" href="https://www.transparenttextures.com">
+<!-- 🟢 [Performance] Preconnect to Map Tilet Servers -->
+    <link rel="preconnect" href="https://a.tile.openstreetmap.org" crossorigin />
+    <link rel="preconnect" href="https://b.tile.openstreetmap.org" crossorigin />
+    <link rel="preconnect" href="https://c.tile.openstreetmap.org" crossorigin />
+
+        {/* stardust.png 預載已移除：該紋理為裝飾性背景，不應佔用 LCP 最高優先資源 */}
+
+        {preloadImage && (
+            <link rel="preload" href={preloadImage} as="image" fetchpriority="high" />
+        )}
+
+{noindex ? (
+<meta name="robots" content="noindex, follow" />
+) : (
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+)}
+{!noindex && <link rel="canonical" href={canonicalURL.href} />}
+<link rel="alternate" hreflang="zh-TW" href={canonicalURL.href} />
+<link rel="alternate" hreflang="x-default" href={canonicalURL.href} />
+
+		<script is:inline>
+            (function() {
+                // 防止重複載入的旗標
+                let gtmLoaded = false;
+                const gtmId = 'G-ZK11421WQY';
+
+                // 🟢 [Analytics] SPA Pageview Trigger
+                window.addEventListener('astro:page-load', () => {
+                   if (gtmLoaded && window.dataLayer) {
+                       window.dataLayer.push({
+                           'event': 'page_view',
+                           'page_location': window.location.href,
+                           'page_path': window.location.pathname,
+                           'page_title': document.title
+                       });
+                   } 
+                });
+
+                function loadGTM() {
+                    if (gtmLoaded) return;
+                    gtmLoaded = true;
+
+                    const script = document.createElement('script');
+                    script.src = "https://www.googletagmanager.com/gtag/js?id=" + gtmId;
+                    script.async = true;
+                    document.head.appendChild(script);
+
+                    window.dataLayer = window.dataLayer || [];
+                    function gtag(){dataLayer.push(arguments);}
+                    gtag('js', new Date());
+                    gtag('config', gtmId);
+                }
+
+                // 定義會觸發載入的「使用者互動」事件
+                const userEvents = ['mousemove', 'click', 'keydown', 'scroll', 'touchstart'];
+                
+                function onUserInteraction() {
+                    loadGTM();
+                    // 觸發一次後，就移除所有監聽器，節省資源
+                    userEvents.forEach(event => window.removeEventListener(event, onUserInteraction));
+                }
+
+                // 綁定事件監聽
+                userEvents.forEach(event => window.addEventListener(event, onUserInteraction, { passive: true, once: true }));
+                
+                // 安全機制：如果使用者完全不動（例如掛網），5 秒後還是自動載入
+                // 5 秒通常足夠避開 PSI 的關鍵檢測期
+                setTimeout(loadGTM, 5000);
+            })();
+		</script>
+
+<meta property="og:type" content="website" />
+<meta property="og:url" content={Astro.url} />
+<meta property="og:title" content={fullTitle} />
+<meta property="og:description" content={description} />
+<meta property="og:image" content={socialImageURL} />
+<meta property="og:site_name" content="Outdoor Fun" />
+<meta property="og:locale" content="zh_TW" />
+
+<meta property="twitter:card" content="summary_large_image" />
+<meta property="twitter:url" content={Astro.url} />
+<meta property="twitter:title" content={fullTitle} />
+<meta property="twitter:description" content={description.substring(0, 200)} />
+<meta property="twitter:image" content={socialImageURL} />
+
+{/* 🟢 [RESTORED] 恢復 ClientRouter 與 分潤變數 */}
+<ClientRouter />
+<script is:inline>
+    var oeya_member = "3F8Gh";
+    var oeya_uid1 = "";
+    var oeya_uid2 = "";
+    var oeya_uid3 = "";
+    var oeya_uid4 = "";
+    var oeya_uid5 = "";
+</script>
+
+<slot name="head" />
+	</head>
+<body class="bg-stone-50 min-h-screen text-stone-800 font-sans flex flex-col pb-16 md:pb-0">
+    <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 z-[100] bg-emerald-600 text-white px-4 py-2 rounded shadow-lg font-bold">
+        跳至主要內容
+    </a>
+<MobileHeader />
+
+<main id="main-content" class="flex-grow scroll-mt-20">
+<slot />
+</main>
+
+<footer class="bg-stone-950 text-stone-50 py-8 md:py-12 mt-12 md:mt-20">
+<div class="container mx-auto px-4">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+<div>
+<h3 class="text-white font-bold text-lg mb-4">關於本站</h3>
+<p class="text-sm leading-relaxed text-stone-100">
+Outdoor Fun | Surf Taiwan (Since 2005) 致力於提供最準確的浪況資訊與衝浪點地圖。
+結合氣象 API 技術，為您分析每日浪況風向與潮汐。
+</p>
+</div>
+<div>
+<h3 class="text-white font-bold text-lg mb-4">熱門連結</h3>
+<ul class="space-y-2 text-sm text-stone-50">
+							<li><a href="/topic/all-advanced/" class="hover:text-white transition">進階浪點</a></li>
+							<li><a href="/topic/all-beginner/" class="hover:text-white transition">新手體驗</a></li>
+							<li><a href="/topic/best-winter/" class="hover:text-white transition">冬季浪點</a></li>
+							<li><a href="/topic/summer-vibes/" class="hover:text-white transition">夏季浪點</a></li>
+                            <li><a href="/directory/" class="hover:text-white transition">全台浪點索引</a></li>
+							
+							<li class="pt-2 border-t border-stone-800 mt-2 text-xs text-stone-300 font-mono">地區推薦</li>
+							<li><a href="/city/宜蘭縣/" class="hover:text-white transition">宜蘭衝浪</a></li>
+							<li><a href="/city/台東縣/" class="hover:text-white transition">台東衝浪</a></li>
+<li><a href="/city/屏東縣/" class="hover:text-white transition">墾丁衝浪</a></li>
+<li><a href="/city/新北市/" class="hover:text-white transition">北海岸衝浪</a></li>
+<li><a href="/city/花蓮縣/" class="hover:text-white transition">花蓮衝浪</a></li>
+<li><a href="/city/苗栗縣/" class="hover:text-white transition">苗栗衝浪</a></li>
+<li><a href="/city/台南市/" class="hover:text-white transition">台南衝浪</a></li>
+<li><a href="/city/高雄市/" class="hover:text-white transition">高雄衝浪</a></li>
+<li><a href="/city/桃園市/" class="hover:text-white transition">桃園衝浪</a></li>
+<li><a href="/city/台中市/" class="hover:text-white transition">台中衝浪</a></li>
+</ul>
+</div>
+<div>
+<h3 class="text-white font-bold text-lg mb-4">免責聲明</h3>
+<p class="text-xs leading-relaxed text-stone-200">
+本網站所有氣象、浪況與地點資訊僅供參考。海象瞬息萬變，請使用者務必自行評估現場風險。Outdoor Fun 不對任何因使用本站資訊而導致的意外、傷害或損失承擔法律責任。衝浪活動具有潛在風險，請量力而為。
+</p>
+<p class="text-xs leading-relaxed text-stone-200 mt-2">
+Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" class="underline hover:text-white">OpenStreetMap contributors</a>.
+</p>
+</div>
+</div>
+<div class="border-t border-stone-800 mt-8 pt-8 text-center text-xs text-stone-400">
+<p class="mb-4 text-stone-300">
+聯盟行銷聲明：本站部分內容包含推廣連結。當您透過這些連結購買商品時，我們可能會獲得微薄的佣金，這不會增加您的購買成本，但能支持我們持續創作優質內容。
+</p>
+<div class="mb-4 space-x-4">
+    <a href="/privacy/" class="hover:text-white underline transition">隱私權政策</a>
+    {/* 服務條款暫時導向首頁或隱私頁，待內容完成後開啟獨立頁面 */}
+    {/* <span class="text-stone-600">|</span> */}
+    {/* <a href="/terms" class="hover:text-white underline transition">服務條款</a> */}
+</div>
+<p class="mb-2 text-stone-500">
+    客服信箱：<a href="mailto:service@outdoorfun.tw" class="hover:text-white transition">service@outdoorfun.tw</a>
+</p>
+&copy; 2005-{new Date().getFullYear()} OutdoorFun. All rights reserved.
+</div>
+</div>
+</footer>
+
+{!hideBottomNav && (
+<nav class="md:hidden fixed bottom-0 left-0 right-0 bg-stone-900 border-t border-stone-800 z-50 pb-safe shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.5)]">
+<div class="grid grid-cols-4 h-16">
+{/* Home */}
+<a href="/" class={`flex flex-col items-center justify-center transition-all duration-200 gap-1 ${isActive('/') ? 'text-white bg-stone-800 font-bold border-t-2 border-sky-500' : 'text-stone-400 hover:text-stone-200 border-t-2 border-transparent'}`}>
+<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+<span class="text-xs font-bold">首頁</span>
+</a>
+{/* Search */}
+<a href="/search/" class={`flex flex-col items-center justify-center transition-all duration-200 gap-1 ${isActive('/search/') ? 'text-white bg-stone-800 font-bold border-t-2 border-sky-500' : 'text-stone-400 hover:text-stone-200 border-t-2 border-transparent'}`}>
+<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+<span class="text-xs font-bold">搜尋</span>
+</a>
+{/* Beginner */}
+<a href="/topic/all-beginner/" class={`flex flex-col items-center justify-center transition-all duration-200 gap-1 ${isActive('/topic/all-beginner/') ? 'text-white bg-stone-800 font-bold border-t-2 border-sky-500' : 'text-stone-400 hover:text-stone-200 border-t-2 border-transparent'}`}>
+<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+<span class="text-xs font-bold">新手</span>
+</a>
+{/* Advanced */}
+<a href="/topic/all-advanced/" class={`flex flex-col items-center justify-center transition-all duration-200 gap-1 ${isActive('/topic/all-advanced/') ? 'text-white bg-stone-800 font-bold border-t-2 border-sky-500' : 'text-stone-400 hover:text-stone-200 border-t-2 border-transparent'}`}>
+<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+<span class="text-xs font-bold">進階</span>
+</a>
+</div>
+</nav>
+)}
+
+<BackToTop />
+
+        <script is:inline src="https://www.conn.tw/track/script/oeya_member_url.js" defer></script>
+
+<script>
+            // 🪙 Global Affiliate Link Rewriter
+            const ICHANNELS_PREFIX = "https://product.mchannles.com/redirect_wa.php?k=3F8Gh&tourl=";
+            const TARGET_DOMAINS = ["momoshop.com.tw", "klook.com"];
+            function processAffiliateLink(anchor) {
+                if (!anchor || !anchor.href) return;
+                const url = anchor.href;
+                if (url.includes('product.mchannles.com')) return;
+                const isTargetDomain = TARGET_DOMAINS.some(domain => url.includes(domain));
+                if (isTargetDomain) {
+                    anchor.href = `${ICHANNELS_PREFIX}${encodeURIComponent(url)}`;
+                    anchor.rel = "nofollow sponsored";
+                    anchor.target = "_blank";
+                }
+            }
+
+            function initAffiliateLinks() {
+                document.querySelectorAll('a[href^="http"]').forEach(processAffiliateLink);
+            }
+
+            const adObserver = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.nodeType === 1) {
+                             const el = node; 
+                             if (el.tagName === 'A') processAffiliateLink(el);
+                             if (el.querySelectorAll) {
+                                 el.querySelectorAll('a[href^="http"]').forEach(processAffiliateLink);
+                             }
+                        }
+                    });
+                });
+            });
+            function startObserver() {
+                initAffiliateLinks();
+                adObserver.disconnect();
+                adObserver.observe(document.body, { childList: true, subtree: true });
+            }
+
+            document.addEventListener('astro:page-load', startObserver);
+            document.addEventListener('DOMContentLoaded', startObserver);
+
+            // 🟢 [GA4] Affiliate Click Event Tracking
+            document.addEventListener('click', function(e) {
+                const link = e.target.closest('a[data-track-affiliate]');
+                if (!link) return;
+                if (typeof gtag === 'function') {
+                    gtag('event', 'affiliate_click', {
+                        affiliate_type: link.dataset.trackAffiliate || 'unknown',
+                        item_name: link.dataset.itemName || '',
+                        item_price: link.dataset.itemPrice || '',
+                        link_url: link.href,
+                        page_path: window.location.pathname
+                    });
+                }
+            }, true);
+        </script>
+
+<style>
+	/* Global Styles */
+	:root {
+		--color-primary: #0ea5e9;
+		--color-secondary: #64748b;
+		--color-accent: #f97316;
+		--color-background: #f8fafc;
+		--color-surface: #ffffff;
+		--color-error: #ef4444;
+		--color-on-primary: #ffffff;
+		--color-on-secondary: #ffffff;
+		--color-on-accent: #ffffff;
+		--color-on-background: #111827;
+		--color-on-surface: #111827;
+		--color-on-error: #ffffff;
+	}
+
+	@font-face {
+		font-family: 'Noto Sans TC';
+		font-weight: 400;
+		font-style: normal;
+		font-display: swap; /* 🟢 [Performance] Avoid invisible text during load */
+		src: url('/fonts/NotoSansTC-Regular.woff2') format('woff2'),
+			 url('/fonts/NotoSansTC-Regular.woff') format('woff');
+	}
+
+	@font-face {
+		font-family: 'Noto Sans TC';
+		font-weight: 700;
+		font-style: bold;
+		font-display: swap; /* 🟢 [Performance] Avoid invisible text during load */
+		src: url('/fonts/NotoSansTC-Bold.woff2') format('woff2'),
+			 url('/fonts/NotoSansTC-Bold.woff') format('woff');
+	}
+
+	/* Base Styles */
+	body {
+		font-family: 'Noto Sans TC', sans-serif;
+		line-height: 1.6;
+		background-color: var(--color-background);
+		color: var(--color-on-background);
+		margin: 0;
+		padding: 0;
+	}
+
+	h1, h2, h3, h4, h5, h6 {
+		margin: 0;
+		padding: 0;
+		color: var(--color-on-surface);
+	}
+
+	a {
+		color: var(--color-primary);
+		text-decoration: none;
+	}
+
+	a:hover {
+		text-decoration: underline;
+	}
+
+	.container {
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: 0 1rem;
+	}
+
+	/* Layout Styles */
+	.flex {
+		display: flex;
+	}
+
+	.grid {
+		display: grid;
+	}
+
+	.hidden {
+		display: none;
+	}
+
+	/* Print Styles */
+	@media print {
+		nav, footer, .js-feature-card, .share-buttons, #back-to-top, .no-print {
+			display: none !important;
+		}
+		
+		* {
+			-webkit-print-color-adjust: exact !important;
+			print-color-adjust: exact !important;
+		}
+
+		body, main {
+			width: 100%;
+			margin: 0;
+			padding: 0;
+			background: white;
+			color: black;
+		}
+
+		/* Show URL after links */
+		a[href^="http"]:after {
+			content: " (" attr(href) ")";
+			font-size: 0.8em;
+			color: #666;
+		}
+		
+		/* Clean up cards */
+		.spot-card {
+			break-inside: avoid;
+			border: 1px solid #ddd;
+			box-shadow: none;
+			padding: 1rem;
+			margin-bottom: 1rem;
+		}
+	}
+</style>
+</body>
+</html>

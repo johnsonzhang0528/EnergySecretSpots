@@ -1,0 +1,173 @@
+---
+import Layout from '../layouts/Layout.astro';
+import surfSpots from '../data/surf_spots.json';
+
+// Define regions mapping for surf spots
+const regionMap: Record<string, string> = {
+  "台北市": "North", "新北市": "North", "基隆市": "North", "桃園市": "North", "新竹縣": "North", "新竹市": "North", "宜蘭縣": "North",
+  "苗栗縣": "Central", "台中市": "Central", "彰化縣": "Central", "南投縣": "Central", "雲林縣": "Central",
+  "嘉義縣": "South", "嘉義市": "South", "台南市": "South", "高雄市": "South", "屏東縣": "South",
+  "花蓮縣": "East", "台東縣": "East",
+  "澎湖縣": "Islands", "金門縣": "Islands", "連江縣": "Islands"
+};
+
+const regionNames: Record<string, string> = {
+  "North": "北部 (North)",
+  "Central": "中部 (Central)",
+  "South": "南部 (South)",
+  "East": "東部 (East)",
+  "Islands": "離島 (Islands)"
+};
+
+// Group spots
+const groupedSpots = surfSpots.reduce((acc, spot) => {
+  const city = spot.city || "Unknown";
+  const region = regionMap[city] || "Other";
+  
+  if (!acc[region]) acc[region] = {};
+  if (!acc[region][city]) acc[region][city] = [];
+  
+  acc[region][city].push(spot);
+  return acc;
+}, {} as Record<string, Record<string, typeof surfSpots>>);
+
+// Sort regions order
+const regionOrder = ["North", "Central", "South", "East", "Islands", "Other"];
+
+// Page Metadata
+const pageTitle = "全台衝浪點索引目錄 | Outdoor Fun (Surf Taiwan)";
+const description = "Outdoor Fun 收錄的全台衝浪點完整列表。依照北、中、南、東部及離島地區分類，方便您快速查找心儀的浪點。";
+
+// 🟢 [SEO] JSON-LD BreadcrumbList  
+const breadcrumbSchema = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "首頁", "item": "https://www.outdoorfun.com.tw/" },
+    { "@type": "ListItem", "position": 2, "name": "全台衝浪點索引" }
+  ]
+};
+---
+
+<Layout title={pageTitle} description={description}>
+  <script type="application/ld+json" slot="head" set:html={JSON.stringify(breadcrumbSchema)}></script>
+  <div class="bg-stone-50 min-h-screen py-12">
+    <div class="container mx-auto px-4 max-w-5xl">
+      <header class="mb-12 text-center">
+        <h1 class="text-3xl md:text-4xl font-bold text-stone-900 mb-4">全台衝浪點總覽</h1>
+        <p class="text-stone-600 max-w-2xl mx-auto">
+          這裡收錄了我們目前資料庫中所有的衝浪點資訊（共 {surfSpots.length} 筆）。
+          若您想尋找特定地點，可以使用 <a href="/search" class="text-emerald-600 hover:text-emerald-700 underline">搜尋功能</a>。
+        </p>
+      </header>
+      
+      <div class="space-y-12">
+        {/* 🟢 新增區塊：季節與主題精選 (解決孤島問題) */}
+        <section class="bg-white rounded-xl shadow-sm p-6 md:p-8 animate-fade-in-up">
+            <h2 class="text-2xl font-bold text-stone-800 border-b-2 border-emerald-100 pb-3 mb-6 flex items-center">
+                <span class="mr-2 text-3xl">🧭</span>
+                主題企劃 (Featured Maps)
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* 冬季入口 */}
+                <a href="/topic/best-winter" class="group relative overflow-hidden rounded-xl h-24 flex items-center px-6 bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md hover:shadow-lg transition-all hover:scale-[1.02]">
+                    <div class="absolute inset-0 bg-white/10 group-hover:bg-white/0 transition-colors"></div>
+                    <div class="relative z-10 flex items-center gap-4">
+                        <span class="text-4xl filter drop-shadow-md">🌬️</span>
+                        <div>
+                            <h3 class="font-bold text-lg leading-tight">東北季風地圖</h3>
+                            <p class="text-xs text-blue-100 mt-1">Winter Swell Spots</p>
+                        </div>
+                    </div>
+                    {/* 裝飾性背景圖示 */}
+                    <svg class="absolute -right-4 -bottom-4 w-24 h-24 text-white/10 rotate-12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg>
+                </a>
+
+                {/* 夏季入口 */}
+                <a href="/topic/summer-vibes" class="group relative overflow-hidden rounded-xl h-24 flex items-center px-6 bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-md hover:shadow-lg transition-all hover:scale-[1.02]">
+                    <div class="absolute inset-0 bg-white/10 group-hover:bg-white/0 transition-colors"></div>
+                    <div class="relative z-10 flex items-center gap-4">
+                        <span class="text-4xl filter drop-shadow-md">🌊</span>
+                        <div>
+                            <h3 class="font-bold text-lg leading-tight">西南氣流地圖</h3>
+                            <p class="text-xs text-orange-100 mt-1">Summer Vibes Spots</p>
+                        </div>
+                    </div>
+                     {/* 裝飾性背景圖示 */}
+                    <svg class="absolute -right-4 -bottom-4 w-24 h-24 text-white/10 rotate-12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21C7.5 21 4 17 4 12C4 7 7.5 3 12 3C16.5 3 20 7 20 12C20 17 16.5 21 12 21Z"/></svg>
+                </a>
+            </div>
+        </section>
+
+        {regionOrder.map(regionKey => {
+          const regionData = groupedSpots[regionKey];
+          if (!regionData) return null;
+
+          return (
+            <section class="bg-white rounded-xl shadow-sm p-6 md:p-8 animate-fade-in-up">
+              <h2 class="text-2xl font-bold text-stone-800 border-b-2 border-emerald-100 pb-3 mb-6 flex items-center">
+                <span class="mr-2 text-3xl">
+                  {regionKey === 'North' && '🌧️'}
+                  {regionKey === 'Central' && '🌤️'}
+                  {regionKey === 'South' && '☀️'}
+                  {regionKey === 'East' && '🌊'}
+                  {regionKey === 'Islands' && '🏝️'}
+                </span>
+                {regionNames[regionKey] || "其他地區"}
+              </h2>
+              
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {Object.keys(regionData).map(city => (
+                  <div class="break-inside-avoid">
+                     {/* 🟢 [Fix] 讓縣市名稱變成可點擊的連結，解決孤島問題 */}
+                     <a href={`/city/${city}/`} class="group inline-block">
+                        <h3 class="font-bold text-lg text-emerald-800 mb-3 bg-emerald-50 px-3 py-1 rounded-lg inline-block group-hover:bg-emerald-100 transition-colors">
+                          {city} <span class="text-xs text-emerald-600 font-normal ml-1">({regionData[city].length})</span>
+                        </h3>
+                     </a>
+                     <ul class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+                       {regionData[city].map(spot => (
+                         <li>
+                           <a 
+                             href={`/spot/${spot.name}/`}
+                             class="text-stone-600 hover:text-emerald-700 text-sm flex items-center group transition-colors"
+                           >
+                             <span class="w-1.5 h-1.5 rounded-full bg-stone-300 group-hover:bg-emerald-500 mr-2 transition-colors"></span>
+                             <span class="truncate">{spot.name}</span>
+                           </a>
+                         </li>
+                       ))}
+                     </ul>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+    </div>
+  </div>
+</Layout>
+
+<style>
+  .animate-fade-in-up {
+    animation: fadeInUp 0.5s ease-out forwards;
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  
+  @keyframes fadeInUp {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  /* Stagger animation for children */
+  section:nth-child(1) { animation-delay: 0.1s; }
+  section:nth-child(2) { animation-delay: 0.2s; }
+  section:nth-child(3) { animation-delay: 0.3s; }
+  section:nth-child(4) { animation-delay: 0.4s; }
+  section:nth-child(5) { animation-delay: 0.5s; }
+</style>

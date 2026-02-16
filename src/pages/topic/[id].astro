@@ -1,0 +1,310 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import SpotCard from '../../components/SpotCard.astro';
+import NativeAdCard from '../../components/NativeAdCard.astro';
+import GearChecklist from '../../components/GearChecklist.astro';
+import spots from '../../data/surf_spots.json';
+import { TOPIC_CONFIG } from '../../data/topic_expansion';
+import { getValidSpots } from '../../utils/filterSpots';
+import { getAdRotator } from '../../utils/adManager';
+
+// 定義 Spot 型別，避免 TypeScript 報錯
+type Spot = {
+    name: string;
+    city: string;
+    area: string;
+    tags?: string[];
+    features?: string[];
+    difficulty?: string;
+    bottom_type?: string;
+    best_swell?: string;
+    best_wind?: string;
+    description?: string;
+    lat: number;
+    lng: number;
+};
+
+export async function getStaticPaths() {
+  const paths = [];
+  const validSpots = getValidSpots(spots);
+  const safeSpots = validSpots as Spot[];
+
+  // 1. 生成 [城市 + 特徵] 組合頁面 (e.g., /topic/yilan-beginner)
+  const { targetCities, features } = TOPIC_CONFIG;
+
+  targetCities.forEach(cityObj => {
+    Object.entries(features).forEach(([featureSlug, featureConfig]) => {
+      // 篩選出符合條件的浪點
+      const matchedSpots = safeSpots.filter(spot => {
+        const isCityMatch = spot.city === cityObj.name;
+        // 檢查 Tags 或 Features 或 Difficulty 是否包含特徵關鍵字 (OR logic)
+        const isFeatureMatch = featureConfig.tags.some(tag => 
+          spot.tags?.includes(tag) || 
+          spot.features?.includes(tag) || 
+          spot.difficulty === tag ||
+          spot.bottom_type === tag
+        );
+        return isCityMatch && isFeatureMatch;
+      });
+
+      // 只有當該主題有至少 1 個浪點時，才生成頁面 (避免 Empty Pages)
+      if (matchedSpots.length > 0) {
+        paths.push({
+          params: { id: `${cityObj.slug}-${featureSlug}` },
+          props: {
+            type: 'city-feature',
+            title: `${cityObj.name}${featureConfig.name}推薦`,
+            description: `正在尋找${cityObj.name}的${featureConfig.name}嗎？我們為您精選 ${matchedSpots.length} 個最適合的浪點與衝浪資訊。`,
+            spots: matchedSpots,
+            city: cityObj.name,
+            keyword: featureConfig.name
+          }
+        });
+      }
+    });
+  });
+
+  // 2. 生成 [通用主題] 頁面 (e.g., /topic/all-beginner)
+  const currentYear = new Date().getFullYear(); // 🟢 pSEO 關鍵：注入當前年份
+
+  TOPIC_CONFIG.generalTopics.forEach(topic => {
+      let matchedSpots = [];
+      let dynamicTitle = topic.title;
+      let dynamicDesc = topic.desc;
+
+      // 根據 ID 硬編碼的特定篩選邏輯
+      if (topic.id === 'all-beginner') {
+          matchedSpots = safeSpots.filter(s => s.difficulty === '初學者' || s.tags?.includes('新手') || s.tags?.includes('教學'));
+      } else if (topic.id === 'all-advanced') {
+          matchedSpots = safeSpots.filter(s => s.difficulty === '中級' || s.difficulty === '專家' || s.tags?.includes('進階') || s.tags?.includes('高手'));
+      } else if (topic.id === 'best-winter') {
+           // 🟢 季節性 pSEO 邏輯升級：檢查最佳浪向是否包含「東北」或「北」
+          // Checks best_swell keywords defined in configuration
+          const mapping = TOPIC_CONFIG.seasonMapping.winter;
+          matchedSpots = safeSpots.filter(s => 
+            mapping.keywords.some(k => s.best_swell?.includes(k)) || 
+            s.tags?.includes('東北季風') ||
+            s.tags?.includes('冬季浪點')
+          );
+          // 優化：動態標題與描述
+          dynamicTitle = `${currentYear} 全台${mapping.adjective}衝浪地圖`;
+          dynamicDesc = `東北季風來襲！為您整理全台灣 ${matchedSpots.length} 個最適合冬季衝浪的浪點。這些地點在東北浪況下表現最佳，是${currentYear}年冬天的首選。`;
+      } else if (topic.id === 'summer-vibes') {
+          const mapping = TOPIC_CONFIG.seasonMapping.summer;
+          matchedSpots = safeSpots.filter(s => 
+            mapping.keywords.some(k => s.best_swell?.includes(k)) || 
+            s.best_wind?.includes('西南') ||
+            s.tags?.includes('夏季浪點')
+          );
+          
+          dynamicTitle = `${currentYear} 夏日${mapping.adjective}衝浪特輯`;
+          dynamicDesc = `夏天除了颱風浪還能去哪？精選 ${matchedSpots.length} 個適合西南氣流的浪點，讓你在炎炎夏日也能享受衝浪樂趣。`;
+      } else {
+        // Fallback catch all if logic not defined above
+        matchedSpots = []; 
+      }
+
+      if (matchedSpots.length > 0) {
+          paths.push({
+            params: { id: topic.id },
+            props: {
+                type: 'general',
+                title: dynamicTitle,
+                description: dynamicDesc,
+                spots: matchedSpots,
+                city: null, // 通用主題不限城市，所以 AdCard 隨機顯示
+                keyword: topic.title
+            }
+          });
+      }
+  });
+
+  return paths;
+}
+
+const { title, description, spots: pageSpots, city, keyword } = Astro.props;
+const { id } = Astro.params;
+const adRotator = getAdRotator();
+
+// 🟢 [SEO] FAQ Logic
+const faqItems = [];
+if (pageSpots.length > 0) {
+    faqItems.push({
+        question: `${title}包含哪些推薦浪點？`,
+        answer: `本專題精選了 ${pageSpots.slice(0, 5).map(s => `<a href="/spot/${s.name}/">${s.name}</a>`).join('、')} 等 ${pageSpots.length} 個與「${keyword}」相關的熱門衝浪地點。`
+    });
+    
+    faqItems.push({
+        question: `這些浪點有什麼特色？`,
+        answer: `這些地點主要符合「${keyword}」的篩選條件。${description}`
+    });
+}
+
+// Breadcrumb Schema
+const breadcrumbSchema = {
+  "@context": "https://schema.org",
+  "@graph": [
+    // ... existing ...
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "首頁",
+            "item": Astro.site ? Astro.site.origin : "https://surftaiwan.url"
+        },
+        {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "主題策展",
+            "item": Astro.site ? `${Astro.site.origin}/topic` : "https://surftaiwan.url/topic"
+        },
+        {
+            "@type": "ListItem",
+            "position": 3,
+            "name": title,
+            "item": Astro.url.href
+        }
+      ]
+    },
+    {
+      "@type": "CollectionPage",
+      "name": title,
+      "description": description,
+      "url": Astro.url.href
+    },
+    {
+      "@type": "ItemList",
+      "name": `${title}列表`,
+      "itemListElement": pageSpots.map((spot, index) => ({
+        "@type": "ListItem",
+        "position": index + 1,
+        "url": `${Astro.site ? Astro.site.origin : ''}/spot/${spot.name}/`, // 🟢 [Fix] 補上結尾斜線，避免 Schema 連結到非標準網址
+        "name": spot.name
+      }))
+    },
+    ...(faqItems.length > 0 ? [{
+        "@type": "FAQPage",
+        "mainEntity": faqItems.map(item => ({
+            "@type": "Question",
+            "name": item.question,
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": item.answer
+            }
+        }))
+    }] : [])
+  ]
+};
+---
+
+<Layout title={`${title} | Surf Taiwan 衝浪地圖`} description={description} geo={{ placename: city || '台灣' }}>
+  <script type="application/ld+json" set:html={JSON.stringify(breadcrumbSchema)} />
+  
+  {/* Hero Header */}
+  <div class="bg-slate-900 text-white py-16 md:py-24 relative overflow-hidden">
+    {/* 背景紋理 */}
+    <div class="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+
+    <div class="container mx-auto px-4 relative z-10 text-center">
+        <h1 class="text-4xl md:text-5xl font-extrabold mb-6 tracking-tight">
+            {title}
+        </h1>
+        <p class="max-w-2xl mx-auto text-slate-300 text-lg md:text-xl leading-relaxed font-light">
+            {description}
+        </p>
+    </div>
+  </div>
+
+  {/* Main Content Area */}
+  <div class="bg-stone-50 min-h-screen py-12 px-4">
+    <div class="container mx-auto">
+        
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-12">
+            
+            {/* Main Content: Spots Grid */}
+            <div class="lg:col-span-2">
+                <div class="flex justify-between items-center mb-6 border-b border-stone-200 pb-4">
+                    <span class="text-stone-500 text-sm">共找到 <strong class="text-stone-800">{pageSpots.length}</strong> 個浪點</span>
+                    <div class="text-sm text-stone-500">
+                        排序：<span class="font-medium text-sky-700">熱門程度</span>
+                    </div>
+                </div>
+
+                {/* Spots Listing */}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {pageSpots.map((spot, index) => {
+                        // 🟢 [Ad Logic] 每 6 個插入一次廣告，且不佔兩欄
+                        const showAd = (index + 1) % 6 === 0;
+                        
+                        return (
+                            <>
+                                {/* 1. 渲染浪點卡片 */}
+                                <SpotCard spot={spot} />
+
+                                {/* 2. Feature 1 手機版購物車 (Mobile In-Feed Injection) */}
+                                {index === 1 && (
+                                    <div class="md:col-span-2 lg:hidden my-4">
+                                        <GearChecklist spot={{ 
+                                            difficulty: '初學者', 
+                                            bottom_type: '沙灘', 
+                                            tags: ['新手', '防曬'] 
+                                        }} />
+                                    </div>
+                                )}
+
+                                {/* 3. Feature 2 廣告 (Native Ad) */}
+                                {showAd && (
+                                    <NativeAdCard adData={adRotator.next()} />
+                                )}
+                            </>
+                        );
+                    })}
+                </div>
+
+                {/* Empty State Fallback (Should be rare due to getStaticPaths filtering) */}
+                {pageSpots.length === 0 && (
+                    <div class="text-center py-20 bg-white rounded-2xl border border-stone-100 shadow-sm">
+                        <p class="text-stone-500 text-lg">目前沒有符合條件的浪點資料。</p>
+                        <a href="/" class="inline-block mt-4 text-sky-600 font-bold hover:underline">
+                            回首頁瀏覽更多
+                        </a>
+                    </div>
+                )}
+
+                {/* 🟢 [Content Depth] FAQ Section */}
+                {faqItems.length > 0 && (
+                <div class="mt-12 bg-white rounded-2xl p-8 border border-stone-100 shadow-sm">
+                    <h2 class="text-2xl font-bold text-stone-800 mb-6">關於「{title}」的常見問題</h2>
+                    <ul class="space-y-6">
+                        {faqItems.map(item => (
+                            <li>
+                                <h3 class="font-bold text-sky-700 text-lg mb-2">{item.question}</h3>
+                                <p class="text-stone-600 leading-relaxed" set:html={item.answer}></p>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+                )}
+            </div>
+
+            {/* Sidebar (Occupies 1 col) */}
+            <aside class="lg:col-span-1 space-y-8 hidden lg:block">
+                <div class="sticky top-24">
+                    <GearChecklist spot={{ 
+                        difficulty: '初學者', 
+                        bottom_type: '沙灘', 
+                        tags: ['新手', '防曬'] 
+                    }} />
+
+                   <div class="mt-8">
+                        <NativeAdCard adData={adRotator.next()} />
+                   </div>
+                </div>
+            </aside>
+        
+        </div>
+    </div>
+  </div>
+</Layout>

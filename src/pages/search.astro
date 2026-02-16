@@ -1,0 +1,911 @@
+---
+import Layout from '../layouts/Layout.astro';
+import SpotCard from '../components/SpotCard.astro';
+import NativeAdCard from '../components/NativeAdCard.astro';
+import surfSpotsData from '../data/surf_spots.json';
+import { getValidSpots } from '../utils/filterSpots';
+import { getAllAds } from '../utils/adManager';
+import { getBadgeClasses } from '../data/adContent';
+
+// Prepare Ads with classes for client-side
+const adsWithClasses = getAllAds().map(ad => ({
+    ...ad,
+    badges: ad.badges.map(b => ({
+        ...b,
+        classString: `text-[10px] font-bold px-2 py-0.5 rounded-full border ${getBadgeClasses(b.color)}`
+    }))
+}));
+
+// 1. 伺服器端預先排序 (CLS 優化)
+const validSpots = getValidSpots(surfSpotsData);
+const spots = [...validSpots].sort((a, b) => 
+    a.name.localeCompare(b.name, 'zh-TW')
+);
+
+// 取得唯一縣市列表
+const cities = [...new Set(validSpots.map(s => s.city))].sort();
+
+// 定義排序選項 (供前端渲染使用)
+const sortOptions = [
+    { value: 'default', label: '預設排序 (筆畫)' },
+    { value: 'difficulty-asc', label: '適合程度：初學優先' },
+    { value: 'difficulty-desc', label: '適合程度：進階優先' },
+];
+
+type SurfSpot = {
+	name: string;
+	city: string;
+	area: string;
+    bottom_type: string;
+	difficulty: string;
+    best_swell?: string;
+    best_wind?: string;
+	features: string[];
+	tags: string[];
+    description?: string;
+};
+
+// 2. Dynamic Filter Generation Logic
+const getRankedValues = (data: SurfSpot[], key: keyof SurfSpot, isArray = false, exclude: string[] = []) => {
+    const counts: Record<string, number> = {};
+    
+    data.forEach(item => {
+        const val = item[key];
+        if (!val) return;
+        
+        const values = isArray ? (val as string[]) : [val as string];
+        values.forEach(v => {
+            if (v && !exclude.includes(v) && v !== '待確認') {
+                 counts[v] = (counts[v] || 0) + 1;
+            }
+        });
+    });
+
+    return Object.entries(counts)
+        .sort((a, b) => b[1] - a[1]) // Sort by frequency
+        .map(([label]) => label);
+};
+
+// Generate dynamic lists
+const topAreas = getRankedValues(validSpots as unknown as SurfSpot[], 'area', false, ['待確認']).slice(0, 12);
+const allBottomTypes = getRankedValues(validSpots as unknown as SurfSpot[], 'bottom_type', false);
+const allDifficulties = getRankedValues(validSpots as unknown as SurfSpot[], 'difficulty', false);
+const topTags = getRankedValues(validSpots as unknown as SurfSpot[], 'tags', true, ['OSM']).slice(0, 10);
+const allFeatures = getRankedValues(validSpots as unknown as SurfSpot[], 'features', true).slice(0, 10);
+
+// Define grouped filters Dynamically
+const filterGroups = [
+    {
+        title: '熱門區域',
+        icon: '📍',
+        items: topAreas.map(area => ({ label: area, key: area, type: 'location' }))
+    },
+    {
+        title: '地形底質',
+        icon: '🌊',
+        items: allBottomTypes.map(type => {
+            let icon = '🌊';
+            if (type.includes('沙')) icon = '🏖️';
+            if (type.includes('礁')) icon = '🪨';
+            if (type.includes('石')) icon = '⚪';
+            return { label: type, key: type, type: 'bottom', icon };
+        })
+    },
+    {
+        title: '適合程度',
+        icon: '🏄',
+        items: allDifficulties.map(diff => {
+            let icon = '🏄';
+            if (diff === '初學者') icon = '🟢';
+            if (diff === '中級') icon = '🔵';
+            if (diff === '專家') icon = '🔴';
+            return { label: diff, key: diff, type: 'difficulty', icon };
+        })
+    },
+    {
+        title: '熱門標籤',
+        icon: '🔥',
+        items: topTags.map(tag => ({ label: tag, key: tag, type: 'tag' }))
+    },
+    {
+        title: '現場設施',
+        icon: '🚿',
+        items: allFeatures.map(f => ({ label: f, key: f, type: 'feature' }))
+    }
+];
+
+// Basic Schema for Search Page
+const searchSchema = {
+  "@context": "https://schema.org",
+  "@graph": [
+     {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "首頁",
+          "item": Astro.site ? Astro.site.origin : "https://surftaiwan.url"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "搜尋與篩選",
+          "item": Astro.url.href
+        }
+      ]
+    },
+    {
+      "@type": "SearchResultsPage",
+      "name": "全台衝浪點搜尋",
+      "description": "提供依照區域、難度、底質與設施條件篩選全台最適合您的衝浪地點。"
+    }
+  ]
+};
+---
+
+<Layout 
+    title="全台衝浪點搜尋 | Surf Taiwan" 
+    noindex={true}
+>
+    <script type="application/ld+json" slot="head" set:html={JSON.stringify(searchSchema)}></script>
+
+	<div class="bg-stone-100 py-6 md:py-12 border-b border-stone-200">
+		<div class="container mx-auto px-4">
+			<h1 class="text-2xl md:text-3xl font-bold text-stone-900 mb-4 md:mb-6 text-center">尋找理想浪點</h1>
+			
+			<div class="max-w-4xl mx-auto space-y-4">
+                {/* Main Search Panel */}
+				<div class="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-stone-200" id="search-controls-main">
+					<div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+						{/* Search Input */}
+						<div class="md:col-span-12">
+							<label for="search-input" class="block text-sm font-semibold text-stone-700 mb-1">關鍵字搜尋</label>
+							<input 
+								type="text" 
+								id="search-input" 
+								placeholder="輸入浪點名稱、地區 (例如: 烏石港、佳樂水)..." 
+								class="w-full px-4 py-3 rounded-lg border border-stone-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition"
+							/>
+						</div>
+
+						{/* Filter & Sort Buttons */}
+						<div class="md:col-span-12 grid grid-cols-2 md:grid-cols-4 gap-4">
+							{/* City Filter Trigger */}
+							<div>
+								<label for="btn-city-picker" class="block text-xs font-bold text-stone-500 mb-1">區域縣市</label>
+                                <input type="hidden" id="filter-city" value="" />
+                                <button 
+                                    id="btn-city-picker"
+                                    class="w-full px-4 py-3 rounded-lg border border-stone-300 bg-stone-50 text-left text-sm text-stone-700 flex justify-between items-center hover:border-sky-500 hover:ring-1 hover:ring-sky-500 transition active:scale-[0.98]"
+                                >
+                                    <span class="truncate">所有縣市</span>
+                                    <svg class="w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </button>
+							</div>
+							
+							{/* Sort Order Trigger */}
+							<div>
+								<label for="btn-sort-picker" class="block text-xs font-bold text-stone-500 mb-1">排序方式</label>
+                                <input type="hidden" id="sort-order" value="default" />
+                                <button 
+                                    id="btn-sort-picker"
+                                    class="w-full px-4 py-3 rounded-lg border border-stone-300 bg-stone-50 text-left text-sm text-stone-700 flex justify-between items-center hover:border-sky-500 hover:ring-1 hover:ring-sky-500 transition active:scale-[0.98]"
+                                >
+                                    <span class="truncate">預設排序</span>
+                                    <svg class="w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </button>
+							</div>
+						</div>
+					</div>
+                    
+                    {/* Status Bar */}
+                    <div class="mt-4 pt-4 border-t border-stone-100 flex justify-between items-center text-xs text-stone-500">
+                        <span class="ml-auto">目前顯示 <span id="count-display" class="font-bold text-stone-800">{spots.length}</span> 筆結果</span>
+                    </div>
+				</div>
+
+                {/* Advanced Filter Button */}
+                <div class="flex gap-3 mt-4">
+                    <button 
+                        id="open-filter-modal"
+                        class="flex-1 md:flex-none flex items-center justify-center gap-2 bg-white border border-stone-300 px-6 py-3 rounded-lg text-stone-700 font-bold hover:border-sky-500 hover:text-sky-600 transition shadow-sm"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                        </svg>
+                        進階篩選
+                        <span id="active-filter-count" class="hidden bg-sky-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1">0</span>
+                    </button>
+
+                    <button id="quick-clear" class="hidden text-stone-400 hover:text-red-500 text-sm font-medium px-4">
+                        清除重設
+                    </button>
+                </div>
+			</div>
+		</div>
+	</div>
+
+    {/* Universal Picker Modal (Single Selection) */}
+    <div id="picker-modal" class="fixed inset-0 z-[110] hidden" role="dialog" aria-modal="true">
+        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" id="picker-backdrop"></div>
+        <div class="fixed inset-x-0 bottom-0 md:inset-0 md:flex md:items-center md:justify-center pointer-events-none">
+            <div class="bg-white w-full md:w-[400px] md:h-auto md:max-h-[80vh] md:rounded-2xl flex flex-col max-h-[70vh] rounded-t-2xl shadow-2xl pointer-events-auto transform transition-transform duration-300 translate-y-full" id="picker-panel">
+                
+                <div class="px-6 py-4 border-b border-stone-100 flex items-center justify-between bg-white md:rounded-t-2xl">
+                    <h3 id="picker-title" class="text-lg font-bold text-stone-800">請選擇</h3>
+                    <button id="close-picker-x" class="p-2 -mr-2 text-stone-400 hover:text-stone-800 rounded-full hover:bg-stone-100 transition">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-2 bg-stone-50" id="picker-content">
+                    {/* 1. City Options List */}
+                    <div id="options-city" class="hidden space-y-1">
+                        <button class="picker-option w-full text-left px-4 py-3 rounded-lg hover:bg-white hover:shadow-sm flex justify-between items-center group transition" data-value="" data-type="city">
+                            <span class="font-medium text-stone-700 group-hover:text-sky-700">所有縣市</span>
+                        </button>
+                        {cities.map(city => (
+                            <button class="picker-option w-full text-left px-4 py-3 rounded-lg hover:bg-white hover:shadow-sm flex justify-between items-center group transition" data-value={city} data-type="city">
+                                <span class="font-medium text-stone-700 group-hover:text-sky-700">{city}</span>
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* 2. Sort Options List */}
+                    <div id="options-sort" class="hidden space-y-1">
+                        {sortOptions.map(opt => (
+                            <button class="picker-option w-full text-left px-4 py-3 rounded-lg hover:bg-white hover:shadow-sm flex justify-between items-center group transition" data-value={opt.value} data-type="sort">
+                                <span class="font-medium text-stone-700 group-hover:text-sky-700">{opt.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {/* Advanced Filter Modal */}
+    <div id="filter-modal" class="fixed inset-0 z-[100] hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity" id="modal-backdrop"></div>
+        <div class="fixed inset-x-0 bottom-0 md:inset-0 md:flex md:items-center md:justify-center pointer-events-none">
+            <div class="bg-white w-full md:w-[800px] md:h-[85vh] md:rounded-2xl flex flex-col h-[90vh] rounded-t-2xl shadow-2xl pointer-events-auto transform transition-transform duration-300 translate-y-full md:translate-y-0" id="modal-panel">
+                
+                <div class="px-6 py-4 border-b border-stone-100 flex items-center justify-between bg-white md:rounded-t-2xl">
+                    <button id="close-modal-x" class="p-2 -ml-2 text-stone-400 hover:text-stone-800 rounded-full hover:bg-stone-100 transition">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                    <h3 class="text-lg font-bold text-stone-800">篩選條件</h3>
+                    <button id="modal-clear-btn" class="text-sm font-bold text-stone-400 hover:text-red-500 underline">重設</button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-6 bg-stone-50/50">
+                    <div class="space-y-8">
+                        {filterGroups.map(group => (
+                            <div class="bg-white p-5 rounded-xl border border-stone-100 shadow-sm">
+                                <h3 class="flex items-center gap-2 text-sm font-bold text-stone-800 mb-4 uppercase tracking-wide">
+                                    <span class="text-xl">{group.icon}</span>
+                                    {group.title}
+                                </h3>
+                                <div class="flex flex-wrap gap-2">
+                                    {group.items.map(filter => (
+                                        <label class="relative flex items-center cursor-pointer group/item select-none">
+                                            <input 
+                                                type="checkbox" 
+                                                id={`filter-${filter.key}`}
+                                                data-type={filter.type} 
+                                                data-key={filter.key}
+                                                class="peer sr-only filter-checkbox" 
+                                            />
+                                            <div class="px-3 py-2 rounded-lg border border-stone-200 bg-stone-50 text-stone-600 text-sm font-medium transition-all
+                                                peer-checked:bg-sky-600 peer-checked:text-white peer-checked:border-sky-600 peer-checked:shadow-md
+                                                group-hover/item:border-sky-300">
+                                                {filter.label}
+                                            </div>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div class="p-4 border-t border-stone-100 bg-white md:rounded-b-2xl pb-safe">
+                    <button id="apply-filters-btn" class="w-full bg-sky-600 text-white font-bold text-lg py-3 rounded-xl shadow-lg shadow-sky-600/30 hover:bg-sky-700 active:scale-[0.98] transition-transform">
+                        顯示 <span id="modal-match-count">{spots.length}</span> 個浪點
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+	<div class="container mx-auto px-4 py-12">
+		<div id="results-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8 min-h-[50vh] content-start">
+            {/* Skeletons: Shown by default, removed by JS */}
+            {Array.from({ length: 9 }).map((_, i) => (
+                <div class="skeleton-loader animate-pulse bg-white rounded-2xl border border-stone-100 h-96 overflow-hidden flex flex-col">
+                    <div class="h-48 bg-stone-200"></div>
+                    <div class="p-5 flex-1 space-y-4">
+                        <div class="flex justify-between">
+                            <div class="h-6 bg-stone-200 rounded w-1/3"></div>
+                            <div class="h-5 bg-stone-200 rounded w-1/4"></div>
+                        </div>
+                        <div class="h-4 bg-stone-200 rounded w-full"></div>
+                        <div class="h-4 bg-stone-200 rounded w-2/3"></div>
+                        <div class="mt-auto pt-4 border-t border-stone-100 flex gap-2">
+                             <div class="h-3 bg-stone-200 rounded w-16"></div>
+                        </div>
+                    </div>
+                </div>
+            ))}
+
+			{/* Data injection for CSR to reduce HTML size */}
+		</div>
+        <script type="application/json" id="spots-data" set:html={JSON.stringify(spots)} />
+        <script type="application/json" id="global-ads-pool" set:html={JSON.stringify(adsWithClasses)} />
+
+        {/* Template for Client-side Ad Injection */}
+        <template id="native-ad-template">
+            <div class="native-ad-injected">
+                <NativeAdCard />
+            </div>
+        </template>
+
+        {/* No Results Message */}
+        <div id="no-results" class="hidden text-center py-20">
+            <div class="text-6xl mb-4">🔍</div>
+            <h3 class="text-xl font-bold text-stone-800 mb-2">找不到符合條件的浪點</h3>
+            <p class="text-stone-500">試著減少篩選條件，或搜尋其他關鍵字</p>
+        </div>
+	</div>
+</Layout>
+
+<script>
+    // Define State Variables
+    let searchInput: HTMLInputElement | null;
+    let filterCityInput: HTMLInputElement | null;
+    let sortOrderInput: HTMLInputElement | null;
+    let checkboxes: NodeListOf<HTMLInputElement>;
+    let resultsGrid: HTMLElement | null;
+    let noResults: HTMLElement | null;
+    let countDisplay: HTMLElement | null;
+    
+    // Data Source
+    let spotsData: any[] = [];
+    let filteredSpots: any[] = [];
+    
+    // Filter Modal Elements
+    let modal: HTMLElement | null;
+    let modalPanel: HTMLElement | null;
+    let openModalBtn: HTMLElement | null;
+    let closeModalBtn: HTMLElement | null;
+    let backdrop: HTMLElement | null;
+    let applyBtn: HTMLElement | null;
+    let modalClearBtn: HTMLElement | null;
+    let modalMatchCount: HTMLElement | null;
+    let activeFilterCount: HTMLElement | null;
+    let quickClearBtn: HTMLElement | null;
+
+    // Ad Rotator State
+    let adPool: any[] = [];
+    let adPoolIndex = 0;
+
+    // Picker Modal Elements
+    // Picker Modal Elements
+    let pickerModal: HTMLElement | null;
+    let pickerPanel: HTMLElement | null;
+    let pickerBackdrop: HTMLElement | null;
+    let pickerCloseBtn: HTMLElement | null;
+    let pickerTitle: HTMLElement | null;
+    let btnCityPicker: HTMLElement | null;
+    let btnSortPicker: HTMLElement | null;
+    let pickerOptions: NodeListOf<HTMLElement>;
+
+    // Ad Strategy
+    const AD_START_INDEX = Math.floor(Math.random() * 10);
+
+    // --- CSR Rendering CONSTANTS (Ported from SpotCard.astro) ---
+    const COLOR_PALETTES = [
+      { gradient: 'bg-gradient-to-br from-blue-600 to-blue-800', accent: 'bg-blue-400', text: 'text-blue-50', opacity: 0.15 },
+      { gradient: 'bg-gradient-to-br from-orange-400 to-red-500', accent: 'bg-orange-300', text: 'text-orange-50', opacity: 0.2 },
+      { gradient: 'bg-gradient-to-br from-teal-500 to-emerald-600', accent: 'bg-teal-300', text: 'text-teal-50', opacity: 0.15 },
+      { gradient: 'bg-gradient-to-br from-slate-700 to-slate-900', accent: 'bg-slate-500', text: 'text-slate-100', opacity: 0.1 },
+      { gradient: 'bg-gradient-to-br from-amber-600 to-yellow-700', accent: 'bg-yellow-400', text: 'text-amber-50', opacity: 0.18 },
+      { gradient: 'bg-gradient-to-br from-indigo-500 to-purple-600', accent: 'bg-indigo-300', text: 'text-indigo-50', opacity: 0.15 },
+      { gradient: 'bg-gradient-to-br from-cyan-500 to-blue-600', accent: 'bg-cyan-300', text: 'text-cyan-50', opacity: 0.15 }
+    ];
+
+    const GEO_ICONS = {
+      sand: `<path d="M12 21C7.5 21 4 17 4 12C4 7 7.5 3 12 3C16.5 3 20 7 20 12C20 17 16.5 21 12 21Z M12 21V13 M8 19L12 13L16 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`,
+      reef: `<path d="M21 21H3L9 9L13 14L16 8L21 21Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" fill="none"/>`,
+      stone: `<circle cx="8" cy="14" r="5" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="18" cy="10" r="4" stroke="currentColor" stroke-width="2" fill="none"/>`,
+      mixed: `<path d="M2 12Q6 7 10 12T18 12T26 12" stroke="currentColor" fill="none" stroke-width="2.5" stroke-linecap="round"/>`,
+      default: `<path d="M12 20V10 M6 6C6 6 8 10 12 10C16 10 18 6 18 6 M12 10C9 14 5 12 5 12 M12 10C15 14 19 12 19 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`
+    };
+
+    const difficultyColor: Record<string, string> = { "初學者": "bg-green-500", "中級": "bg-blue-500", "專家": "bg-red-500" };
+
+    const getHashIndex = (str: string, max: number) => {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return Math.abs(hash % max);
+    };
+
+    function createSpotCardHTML(spot: any) {
+        // Theme Logic
+        const theme = COLOR_PALETTES[getHashIndex(spot.name + spot.city, COLOR_PALETTES.length)];
+        const diffBg = difficultyColor[spot.difficulty] || "bg-stone-500";
+        
+        let iconSvg = GEO_ICONS.default;
+        const bottom = spot.bottom_type || "";
+        if (bottom.includes("沙")) iconSvg = GEO_ICONS.sand;
+        else if (bottom.includes("礁") || bottom.includes("岩")) iconSvg = GEO_ICONS.reef;
+        else if (bottom.includes("石")) iconSvg = GEO_ICONS.stone;
+        else if (bottom.includes("混合")) iconSvg = GEO_ICONS.mixed;
+
+        const glowPos = getHashIndex(spot.name, 4);
+        const glowClasses = ['-top-12 -left-12', '-top-12 -right-12', '-bottom-12 -left-12', '-bottom-12 -right-12'];
+        const isLongName = spot.name.length > 8;
+        const fontSize = isLongName ? 'text-2xl' : 'text-3xl';
+        
+        // Pattern logic
+        const patternId = `pattern-${spot.name}-${Math.random().toString(36).substr(2,9)}`;
+
+        const patternSvg = `
+          <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <pattern id="${patternId}" x="0" y="0" width="48" height="48" patternUnits="userSpaceOnUse">
+                 <g transform="translate(12, 12)" opacity="${theme.opacity}" color="currentColor" class="${theme.text}">
+                   ${iconSvg}
+                 </g>
+              </pattern>
+            </defs>
+            <rect x="0" y="0" width="100%" height="100%" fill="url(#${patternId})" />
+          </svg>
+        `;
+
+        return `
+        <div class="spot-item transition-opacity duration-300" style="content-visibility: auto; contain-intrinsic-size: 1px 400px;">
+          <a href="/spot/${spot.name}" class="block group h-full">
+            <article class="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden hover:shadow-md transition-shadow h-full flex flex-col active:scale-[0.98] transform duration-100">
+                <div class="relative overflow-hidden h-40 flex flex-col items-center justify-center p-4 text-center ${theme.gradient}">
+                    <div class="absolute w-40 h-40 rounded-full opacity-30 blur-3xl mix-blend-screen ${theme.accent} ${glowClasses[glowPos]}"></div>
+                    <div class="absolute inset-0 w-full h-full text-white pointer-events-none mix-blend-overlay">${patternSvg}</div>
+                    <div class="absolute inset-0 opacity-20 bg-[url('data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%20200%20200%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cfilter%20id%3D%22noiseFilter%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%220.65%22%20numOctaves%3D%221%22%20stitchTiles%3D%22stitch%22%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url(%23noiseFilter)%22%20opacity%3D%221%22%2F%3E%3C%2Fsvg%3E')] mix-blend-overlay"></div>
+                    <div class="relative z-10 flex flex-col items-center gap-1">
+                        <span class="text-[10px] font-bold tracking-[0.25em] uppercase border-b border-white/30 pb-1 mb-1 shadow-sm ${theme.text}">TW SURF</span>
+                        <div class="font-bold tracking-wide leading-tight text-white drop-shadow-lg font-sans ${fontSize}">${spot.name}</div>
+                        <div class="w-6 h-1 bg-white/50 rounded-full mt-1 shadow-sm backdrop-blur-sm"></div>
+                    </div>
+                    <div class="absolute top-2 right-2 flex gap-2 z-20">
+                        <span class="${diffBg} text-white text-xs font-bold px-2 py-1 rounded backdrop-blur-sm shadow-sm bg-opacity-90">${spot.difficulty}</span>
+                    </div>
+                    <div class="absolute bottom-2 left-2 text-white text-xs font-bold drop-shadow-md z-20">
+                        🌊 ${spot.bottom_type}
+                    </div>
+                </div>
+                <div class="p-5 flex-grow flex flex-col">
+                    <div class="flex justify-between items-start mb-2">
+                        <h2 class="text-lg font-bold text-stone-900 group-hover:text-sky-800 transition-colors">${spot.name}</h2>
+                        <span class="text-xs font-semibold bg-stone-100 text-stone-700 px-2 py-1 rounded-full">${spot.city}</span>
+                    </div>
+                    <p class="text-stone-600 text-sm mb-4 line-clamp-2 leading-relaxed flex-grow">${spot.description || ''}</p>
+                    <div class="flex items-center gap-3 text-xs text-stone-600 border-t border-stone-100 pt-3">
+                        ${spot.best_swell ? `<span>最佳浪向: ${spot.best_swell}</span>` : ''}
+                    </div>
+                </div>
+            </article>
+          </a>
+        </div>`;
+    }
+
+    function randomizeAdCard(adElement: Element, sequenceIndex: number) {
+        if (!adPool || adPool.length === 0) return;
+
+        // Get next ad from pool (using global rotation index)
+        const ad = adPool[adPoolIndex];
+        adPoolIndex = (adPoolIndex + 1) % adPool.length;
+        
+        // Find component root
+        const card = adElement.querySelector('.js-feature-card');
+        if (!card) return;
+
+        try {
+            const img = card.querySelector('.js-feature-img') as HTMLImageElement;
+            const title = card.querySelector('.js-feature-title');
+            const titleOverlay = card.querySelector('.js-feature-title-overlay');
+            const desc = card.querySelector('.js-feature-desc');
+            const cta = card.querySelector('.js-feature-cta');
+            const link = card.querySelector('.js-feature-link') as HTMLAnchorElement;
+            const badgesContainer = card.querySelector('.js-feature-badges');
+
+            if (img) { img.src = ad.image; img.alt = ad.title; }
+            if (title) title.textContent = ad.title;
+            if (titleOverlay) titleOverlay.textContent = ad.overlayTitle || ad.title; 
+            if (desc) desc.textContent = ad.desc;
+            if (cta) cta.textContent = ad.cta;
+            if (link) {
+                link.href = ad.link;
+                link.setAttribute('aria-label', ad.title);
+            }
+            if (badgesContainer && ad.badges) {
+                badgesContainer.innerHTML = ad.badges.map((b: any) => 
+                    `<span class="${b.classString}">${b.text}</span>`
+                ).join('');
+            }
+
+        } catch (e) {
+            console.error('Failed to randomize ad', e);
+        }
+    }
+
+    function calculateMatches(simulateCheckboxes = false): number {
+        if (!spotsData.length) return 0;
+        const term = searchInput ? searchInput.value.toLowerCase() : '';
+        const cityFilter = filterCityInput?.value || '';
+        const activeCheckboxes = Array.from(checkboxes).filter(cb => cb.checked);
+
+        const results = spotsData.filter(spot => {
+            const name = (spot.name || '').toLowerCase();
+            const city = spot.city || '';
+            const area = spot.area || '';
+            const bottom = spot.bottom_type || '';
+            const difficulty = spot.difficulty || '';
+            const tags = (spot.tags || []).join(',');
+            const features = (spot.features || []).join(',');
+            
+            let matchesSearch = term === '' || 
+                                  name.includes(term) || 
+                                  city.includes(term) || 
+                                  area.includes(term) ||
+                                  tags.includes(term) ||
+                                  bottom.includes(term);
+            
+            const matchesCity = cityFilter === '' || city === cityFilter;
+
+            const matchesAdvanced = activeCheckboxes.every(cb => {
+                const type = cb.dataset.type;
+                const rawKey = cb.dataset.key || '';
+                const keys = rawKey.split('/');
+
+                if (type === 'bottom') {
+                    return bottom.includes(rawKey);
+                } else if (type === 'difficulty') {
+                    return difficulty === rawKey;
+                } else if (type === 'feature') {
+                    return features.includes(rawKey);
+                } else if (type === 'tag') {
+                    return keys.some(k => tags.includes(k));
+                } else if (type === 'location') {
+                     return keys.some(k => 
+                        city.includes(k) || 
+                        area.includes(k) || 
+                        name.includes(k)
+                     );
+                }
+                return true;
+            });
+
+            return matchesSearch && matchesCity && matchesAdvanced;
+        });
+
+        if (!simulateCheckboxes) {
+            filteredSpots = results;
+        }
+        return results.length;
+    }
+
+    function renderResults() {
+        if (!resultsGrid || !sortOrderInput) return;
+
+        // 1. Remove Skeletons & Reset
+        resultsGrid.innerHTML = ''; // CSR Strategy: Clear all and rebuild
+
+        // 2. Filter & Sort
+        calculateMatches(); // updates filteredSpots
+        const order = sortOrderInput.value;
+
+        if (order === 'default') {
+             filteredSpots.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        } else if (order.includes('difficulty')) {
+            const diffRank: Record<string, number> = { "初學者": 1, "中級": 2, "專家": 3 };
+            filteredSpots.sort((a, b) => {
+                const da = diffRank[a.difficulty || ''] || 0;
+                const db = diffRank[b.difficulty || ''] || 0;
+                return order === 'difficulty-asc' ? da - db : db - da;
+            });
+        }
+
+        // 3. Prepare filters UI
+        let adInsertionCount = 0;
+        const term = searchInput ? searchInput.value.toLowerCase() : '';
+        const cityFilter = filterCityInput?.value || '';
+        const activeCheckboxes = Array.from(checkboxes).filter(cb => cb.checked);
+
+        // UpdateUI: Active Filters
+        if (activeFilterCount) {
+            activeFilterCount.textContent = activeCheckboxes.length.toString();
+            if (activeCheckboxes.length > 0) {
+                activeFilterCount.classList.remove('hidden');
+                quickClearBtn?.classList.remove('hidden');
+            } else {
+                activeFilterCount.classList.add('hidden');
+                if (!term && !cityFilter) quickClearBtn?.classList.add('hidden');
+            }
+        }
+        if (quickClearBtn) {
+            quickClearBtn.classList.toggle('hidden', !term && !cityFilter && activeCheckboxes.length === 0);
+        }
+
+        const adTemplate = document.getElementById('native-ad-template') as HTMLTemplateElement;
+
+        // 4. Render Loop
+        filteredSpots.forEach((spot, index) => {
+             // Generate Card HTML
+             const cardHtml = createSpotCardHTML(spot);
+             const tempDiv = document.createElement('div');
+             tempDiv.innerHTML = cardHtml.trim();
+             const cardEl = tempDiv.firstChild as HTMLElement;
+             
+             resultsGrid?.appendChild(cardEl);
+
+             // Inject Ads every 6 items
+             if ((index + 1) % 6 === 0 && adTemplate) {
+                     const fragment = adTemplate.content.cloneNode(true) as DocumentFragment;
+                     const wrapper = fragment.querySelector('.native-ad-injected') as HTMLElement;
+                     
+                     if (wrapper) {
+                        randomizeAdCard(wrapper, AD_START_INDEX + adInsertionCount);
+                        adInsertionCount++;
+                     }
+                     resultsGrid?.appendChild(fragment);
+            }
+        });
+
+        if (countDisplay) countDisplay.textContent = filteredSpots.length.toString();
+        if (filteredSpots.length === 0) {
+            resultsGrid?.classList.add('hidden');
+            noResults?.classList.remove('hidden');
+        } else {
+            resultsGrid?.classList.remove('hidden');
+            noResults?.classList.add('hidden');
+        }
+    }
+
+    // --- Modal Logic ---
+    function openModal() {
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        setTimeout(() => {
+            if (modalPanel) modalPanel.classList.remove('translate-y-full');
+        }, 10);
+        updateModalCount();
+    }
+
+    function closeModal() {
+        if (!modal) return;
+        if (modalPanel) modalPanel.classList.add('translate-y-full');
+        setTimeout(() => {
+            modal.classList.add('hidden');
+            document.body.style.overflow = '';
+        }, 300);
+    }
+
+    function updateModalCount() {
+        const count = calculateMatches(true);
+        if (modalMatchCount) modalMatchCount.textContent = count.toString();
+    }
+
+    // --- Picker Logic ---
+    function openPicker(type: 'city' | 'sort') {
+        if (!pickerModal) return;
+        if (pickerTitle) pickerTitle.textContent = type === 'city' ? '選擇縣市' : '排序方式';
+        
+        const cityList = document.getElementById('options-city');
+        const sortList = document.getElementById('options-sort');
+        
+        if (type === 'city') {
+            cityList?.classList.remove('hidden');
+            sortList?.classList.add('hidden');
+        } else {
+            cityList?.classList.add('hidden');
+            sortList?.classList.remove('hidden');
+        }
+
+        const currentValue = type === 'city' ? filterCityInput?.value : sortOrderInput?.value;
+        pickerOptions.forEach(opt => {
+            if (opt.dataset.type === type && opt.dataset.value === currentValue) {
+                opt.classList.add('bg-stone-100');
+            } else {
+                opt.classList.remove('bg-stone-100');
+            }
+        });
+
+        pickerModal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        setTimeout(() => {
+            if (pickerPanel) pickerPanel.classList.remove('translate-y-full');
+        }, 10);
+    }
+
+    function closePicker() {
+        if (!pickerModal) return;
+        if (pickerPanel) pickerPanel.classList.add('translate-y-full');
+        setTimeout(() => {
+            pickerModal.classList.add('hidden');
+            document.body.style.overflow = '';
+        }, 300);
+    }
+
+    function handlePickerSelection(el: HTMLElement) {
+        const type = el.dataset.type;
+        const value = el.dataset.value || '';
+        const label = el.querySelector('span.font-medium')?.textContent || '';
+
+        if (type === 'city') {
+            if (filterCityInput) filterCityInput.value = value;
+            if (btnCityPicker) {
+                 const span = btnCityPicker.querySelector('span');
+                 if (span) span.textContent = value === '' ? '所有縣市' : value;
+            }
+        } else if (type === 'sort') {
+            if (sortOrderInput) sortOrderInput.value = value;
+            if (btnSortPicker) {
+                 const span = btnSortPicker.querySelector('span');
+                 if (span) span.textContent = label;
+            }
+        }
+        renderResults();
+        closePicker();
+    }
+
+    function init() {
+        console.log('Search Page Init Started');
+        // Init Data
+        const scriptDataInfo = document.getElementById('spots-data');
+        if (scriptDataInfo && scriptDataInfo.textContent) {
+           try {
+               spotsData = JSON.parse(scriptDataInfo.textContent);
+               console.log('Spots Data Loaded:', spotsData.length);
+           } catch(e) {
+               console.error("Failed to parse spots data", e);
+           }
+        } else {
+            console.error('Spots Data Element Not Found');
+        }
+
+        // Init Ad Pool (Global Shuffled)
+        const adsDataInfo = document.getElementById('global-ads-pool');
+        if (adsDataInfo && adsDataInfo.textContent) {
+             try {
+                 adPool = JSON.parse(adsDataInfo.textContent);
+                 // Shuffle
+                 for (let i = adPool.length - 1; i > 0; i--) {
+                     const j = Math.floor(Math.random() * (i + 1));
+                     [adPool[i], adPool[j]] = [adPool[j], adPool[i]];
+                 }
+                 // Random Start
+                 adPoolIndex = Math.floor(Math.random() * adPool.length);
+                 console.log('Ads Pool Loaded:', adPool.length);
+             } catch(e) { console.error('Failed to parse ads data', e); }
+        } else {
+            console.warn('Ads Pool Element Not Found');
+        }
+
+        searchInput = document.getElementById('search-input') as HTMLInputElement;
+        filterCityInput = document.getElementById('filter-city') as HTMLInputElement;
+        sortOrderInput = document.getElementById('sort-order') as HTMLInputElement;
+        checkboxes = document.querySelectorAll('.filter-checkbox');
+        resultsGrid = document.getElementById('results-grid');
+        noResults = document.getElementById('no-results');
+        countDisplay = document.getElementById('count-display');
+        // No longer need 'items' from DOM
+        
+        if (!resultsGrid) console.error('Results Grid Not Found');
+
+        modal = document.getElementById('filter-modal');
+        modalPanel = document.getElementById('modal-panel');
+        openModalBtn = document.getElementById('open-filter-modal');
+        closeModalBtn = document.getElementById('close-modal-x');
+        backdrop = document.getElementById('modal-backdrop');
+        applyBtn = document.getElementById('apply-filters-btn');
+        modalClearBtn = document.getElementById('modal-clear-btn');
+        modalMatchCount = document.getElementById('modal-match-count');
+        activeFilterCount = document.getElementById('active-filter-count');
+        quickClearBtn = document.getElementById('quick-clear');
+
+        pickerModal = document.getElementById('picker-modal');
+        pickerPanel = document.getElementById('picker-panel');
+        pickerBackdrop = document.getElementById('picker-backdrop');
+        pickerCloseBtn = document.getElementById('close-picker-x');
+        pickerTitle = document.getElementById('picker-title');
+        btnCityPicker = document.getElementById('btn-city-picker');
+        btnSortPicker = document.getElementById('btn-sort-picker');
+        pickerOptions = document.querySelectorAll('.picker-option');
+
+        if (searchInput) searchInput.addEventListener('input', () => { renderResults(); });
+        
+        if (openModalBtn) openModalBtn.addEventListener('click', openModal);
+        if (closeModalBtn) closeModalBtn.addEventListener('click', closeModal);
+        if (backdrop) backdrop.addEventListener('click', closeModal);
+        checkboxes.forEach(cb => { cb.addEventListener('change', () => { updateModalCount(); }); });
+        if (modalClearBtn) modalClearBtn.addEventListener('click', () => {
+            checkboxes.forEach(cb => cb.checked = false);
+            updateModalCount();
+        });
+        if (applyBtn) applyBtn.addEventListener('click', () => { renderResults(); closeModal(); });
+        
+        if (btnCityPicker) btnCityPicker.addEventListener('click', () => openPicker('city'));
+        if (btnSortPicker) btnSortPicker.addEventListener('click', () => openPicker('sort'));
+        if (pickerCloseBtn) pickerCloseBtn.addEventListener('click', closePicker);
+        if (pickerBackdrop) pickerBackdrop.addEventListener('click', closePicker);
+        pickerOptions.forEach(opt => {
+            opt.addEventListener('click', () => handlePickerSelection(opt as HTMLElement));
+        });
+
+        if (quickClearBtn) quickClearBtn.addEventListener('click', () => {
+             if(searchInput) searchInput.value = '';
+             if(filterCityInput) filterCityInput.value = '';
+             if(btnCityPicker) { 
+                 const s = btnCityPicker.querySelector('span'); 
+                 if(s) s.textContent = '所有縣市'; 
+             }
+             if(sortOrderInput) sortOrderInput.value = 'default';
+             if(btnSortPicker) {
+                 const s = btnSortPicker.querySelector('span');
+                 if(s) s.textContent = '預設排序 (筆畫)';
+             }
+             checkboxes.forEach(cb => cb.checked = false);
+             renderResults();
+        });
+
+        // Initialize immediately if possible, or wait a tick
+        if (spotsData.length > 0) {
+            initFromURL();
+        } else {
+             setTimeout(() => {
+                initFromURL();
+            }, 50);
+        }
+    }
+
+    function initFromURL() {
+         console.log('Init From URL called');
+         const params = new URLSearchParams(window.location.search);
+         const query = params.get('q');
+         const city = params.get('city');
+         const tag = params.get('tag');
+         const bottom = params.get('bottom');
+         const diff = params.get('difficulty');
+
+         if (query && searchInput) searchInput.value = query;
+         
+         if (city && filterCityInput) {
+             filterCityInput.value = city;
+             if (btnCityPicker) {
+                 const span = btnCityPicker.querySelector('span');
+                 if (span) span.textContent = city;
+             }
+         }
+
+         if (tag) {
+             checkboxes.forEach(cb => {
+                 const label = cb.parentElement?.textContent || '';
+                 if (cb.dataset.key === tag || label.includes(tag)) cb.checked = true;
+             });
+             if (![...checkboxes].some(c=>c.checked) && !query && searchInput) searchInput.value = tag;
+         }
+
+         // Handle Difficulty/Bottom filters from URL if needed
+         if (diff) {
+            checkboxes.forEach(cb => { if (cb.dataset.type === 'difficulty' && cb.dataset.key === diff) cb.checked = true; });
+         }
+
+         renderResults();
+    }
+
+    document.addEventListener('astro:page-load', init);
+</script>

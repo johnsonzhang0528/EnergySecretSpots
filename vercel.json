@@ -1,0 +1,39 @@
+{
+  "headers": [
+    {
+      "source": "/feeds/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS" },
+        { "key": "Cache-Control", "value": "public, max-age=3600, s-maxage=86400" }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/(.*).php",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/modules/(.*)",
+      "destination": "/",
+      "statusCode": 410
+    },
+    {
+      "source": "/upload/(.*)",
+      "destination": "/",
+      "statusCode": 410
+    },
+    {
+      "source": "/member/(.*)",
+      "destination": "/",
+      "statusCode": 410
+    },
+    {
+      "source": "/product/(.*)",
+      "destination": "/",
+      "statusCode": 410
+    }
+  ]
+}

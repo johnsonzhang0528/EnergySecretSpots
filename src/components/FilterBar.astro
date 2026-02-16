@@ -1,0 +1,91 @@
+---
+import spots from '../data/surf_spots.json';
+
+// 1. 定義固定篩選項目 (衝浪專屬)
+const fixedFilters = [
+  { label: '全部', value: 'all', icon: '🏄' },
+  { label: '初學者', value: 'beginner', icon: '🐣' }, // 對應 difficulty
+  { label: '沙灘', value: 'sand', icon: '🏖️' },      // 對應 bottom_type
+  { label: '有淋浴', value: 'shower', icon: '🚿' },   // 對應 features
+];
+
+// 2. 動態統計標籤出現次數
+const tagCounts: Record<string, number> = {};
+spots.forEach(spot => {
+    // 衝浪資料可能有 tags, features, difficulty 混合，這裡範例只統計 tags
+    (spot.tags || []).forEach(tag => {
+        if (tag) tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+    });
+});
+
+// 移除已經在固定篩選中的標籤 (避免重複)
+fixedFilters.forEach(f => delete tagCounts[f.label]);
+
+// 3. 定義衝浪專屬圖示對照表
+const iconMap: Record<string, string> = {
+    '左跑浪': '⬅️',
+    '右跑浪': '➡️',
+    '定點起浪': '📍',
+    '河口': '🌊',
+    '珊瑚礁': '🪨',
+    'SUP': '🛶',
+    '日出': '🌅',
+    '夕陽': '🌇',
+    '好停車': '🅿️',
+    '人少': '🤫',
+    '比賽場地': '🏆',
+    '短板': '🏄‍♂️',
+    '長板': '🏄‍♀️',
+    '教學': '🏫',
+    '租板': '🛹',
+    '東北季風': '🌬️',
+    '颱風浪': '🌀'
+};
+const defaultIcon = '🏷️';
+
+// 4. 选择前 10 名熱門標籤
+const sortedTags = Object.entries(tagCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 10)
+    .map(([tag]) => ({
+        label: tag,
+        value: tag,
+        icon: iconMap[tag] || defaultIcon
+    }));
+
+// 合併所有篩選項目
+const filters = [...fixedFilters, ...sortedTags];
+---
+
+<div class="sticky top-16 md:top-20 z-40 bg-stone-50/95 backdrop-blur-sm border-b border-stone-200 py-3 transition-all duration-300">
+  <div class="container mx-auto px-4">
+    <!-- Horizontal Scroll Container -->
+    <div class="flex items-center gap-3 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 md:mx-0 md:px-0 scroll-smooth">
+      {filters.map((filter) => (
+        <a 
+            href={filter.value === 'all' ? '/search' : `/search?q=${filter.label}`} 
+            class="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-stone-200 text-stone-600 text-sm font-medium shadow-sm active:scale-95 transition-all hover:border-emerald-500 hover:text-emerald-700 whitespace-nowrap"
+        >
+          <span>{filter.icon}</span>
+          <span>{filter.label}</span>
+        </a>
+      ))}
+      
+      <!-- Padding details for right side of scrolling area -->
+      <div class="w-4 flex-shrink-0 md:hidden"></div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Hide scrollbar for Chrome, Safari and Opera */
+  .scrollbar-hide::-webkit-scrollbar {
+      display: none;
+  }
+  
+  /* Hide scrollbar for IE, Edge and Firefox */
+  .scrollbar-hide {
+      -ms-overflow-style: none;  /* IE and Edge */
+      scrollbar-width: none;  /* Firefox */
+  }
+</style>

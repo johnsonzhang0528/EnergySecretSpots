@@ -1,0 +1,188 @@
+---
+// src/components/NativeAdCard.astro
+import { ads, getBadgeClasses } from '../data/adContent';
+import topCampsInventory from '../data/top_camps.json';
+import type { Ad } from '../utils/adManager';
+
+interface Props {
+    city?: string;
+    adData?: Ad;
+}
+
+const { city, adData } = Astro.props;
+
+// 1. 定義「純地理」鄰居關係 (Geographic Map)
+// 這只代表地理位置的替補建議，不代表資料有無
+const GEOGRAPHIC_NEIGHBORS: Record<string, string> = {
+    '基隆市': '新北市',
+    '台北市': '新北市',
+    '新北市': '桃園市',
+    '桃園市': '新竹縣',
+    '新竹市': '新竹縣',
+    '新竹縣': '苗栗縣',
+    '苗栗縣': '台中市',
+    '台中市': '南投縣',
+    '彰化縣': '南投縣',
+    '雲林縣': '嘉義縣',
+    '嘉義市': '嘉義縣',
+    '嘉義縣': '台南市',
+    '台南市': '高雄市', // 這裡定義：如果台南沒資料，去高雄
+    '高雄市': '屏東縣',
+    '屏東縣': '台東縣',
+    '宜蘭縣': '新北市', // 或是花蓮
+    '花蓮縣': '台東縣',
+    '台東縣': '屏東縣',
+    '澎湖縣': '高雄市', // 搭船去高雄
+    '金門縣': '高雄市',
+    '連江縣': '基隆市'
+};
+
+// 預先處理廣告資料，把 Badge 的 Class 算好，方便前端 JS 直接使用
+const adsWithClasses = ads.map(ad => ({
+    ...ad,
+    badges: ad.badges.map(b => ({
+        ...b,
+        classString: `text-[10px] font-bold px-2 py-0.5 rounded-full border ${getBadgeClasses(b.color)}`
+    }))
+}));
+
+// Server-side Logic
+let selectedAd;
+
+if (adData) {
+    // 🟢 Strategy 1: Explicit Ad Data (Caller Controlled)
+    // 如果外部已經決定好廣告內容 (例如 Ad Rotator)，直接使用
+    selectedAd = adData;
+
+} else if (city) {
+    // 🟢 Strategy 2: Contextual Deep Linking (情境式深度互連)
+    // 如果有傳入 city (例如: 宜蘭縣)，則優先顯示該城市的露營區推廣
+    
+    // 3. 核心邏輯：準確的資料驅動判斷 (Smart Fallback Logic)
+    let targetCity = city;
+    let isFallback = false;
+
+    // 檢查庫存：露營站真的有這個城市的資料嗎？
+    // topCampsInventory 的結構應該是 { "苗栗縣": [...], "南投縣": [...] }
+    const inventory = topCampsInventory as Record<string, any[]>;
+    const hasDirectData = city && inventory[city] && inventory[city].length > 0;
+
+    if (!hasDirectData && city) {
+        // 情況 A：使用者在「台南」，但露營站目前「沒台南資料」
+        // 動作：啟動降級，查找地理鄰居
+        const neighbor = GEOGRAPHIC_NEIGHBORS[city];
+        
+        // 雙重確認：鄰居有資料嗎？
+        if (neighbor && inventory[neighbor] && inventory[neighbor].length > 0) {
+            targetCity = neighbor;
+            isFallback = true; // 標記為降級，用於調整文案
+        } else {
+            // 情況 B：連鄰居都沒資料 (極端狀況) -> 預設顯示熱門城市 (如苗栗)
+            // 這裡可以寫死一個絕對有資料的城市
+            targetCity = '苗栗縣'; 
+            isFallback = true;
+        }
+    }
+
+    selectedAd = {
+        id: 'cross-promo-city-deep-link',
+        badges: [
+             { text: '📍 地區推薦', color: 'blue' },
+             { text: '衝浪 x 露營', color: 'orange' }
+        ],
+        // ✨ 優化 UI: 為圖片層設置專用的簡短標題 (Headline)，避免疊在圖片上的字太長
+        overlayTitle: `推薦${targetCity}露營`, // e.g. "推薦高雄市露營"
+        
+        title: isFallback ? `衝浪累了嗎？推薦${targetCity}露營！` : `衝浪累了嗎？來去${targetCity}露營吧！`,
+        desc: isFallback 
+            ? `${city}周邊推薦！精選 ${targetCity} 優質露營區，免裝備 Glamping、森林系野營，立刻預訂您的下一趟旅程。`
+            : `精選 ${targetCity} 優質露營區，免裝備 Glamping、森林系野營，立刻預訂您的下一趟旅程。`,
+        image: '/images/camping-default.jpg',
+        cta: `找 ${targetCity} 營區`,
+        link: `https://www.outdoorcampingworld.com/city/${targetCity}?utm_source=surf_site&utm_medium=content_grid&utm_campaign=deep_link`
+    };
+    
+    // 計算 badge classes
+    selectedAd.badges = selectedAd.badges.map(b => ({
+        ...b,
+        classString: `text-[10px] font-bold px-2 py-0.5 rounded-full border ${getBadgeClasses(b.color)}`
+    }));
+
+} else {
+    // 預設隨機邏輯 (首頁、列表頁使用)
+    selectedAd = adsWithClasses[Math.floor(Math.random() * adsWithClasses.length)];
+}
+---
+
+<article 
+  class="group relative w-full rounded-2xl overflow-hidden shadow-sm border border-stone-100 bg-white flex flex-col h-full hover:shadow-md transition-all duration-300 active:scale-[0.98] js-feature-card"
+  data-items-pool={JSON.stringify(adsWithClasses)}
+>
+  
+  <div class="h-40 relative overflow-hidden bg-stone-200 animate-pulse group-hover:shadow-inner transition-all duration-500">
+     {/* Image Layer */}
+     <img 
+        src={selectedAd.image.replace('/ads/', '/featured/')}
+        alt={selectedAd.title} 
+        width="800"
+        height="450"
+        loading="lazy" 
+        decoding="async"
+        class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 js-feature-img"
+        onload="this.parentElement.classList.remove('animate-pulse')"
+     />
+     
+     {/* Overlay for Text Legibility */}
+     <div class="absolute inset-0 bg-stone-900/40 group-hover:bg-stone-900/30 transition-colors duration-300"></div>
+
+     {/* Central Content (Matching SpotCard Style) */}
+     <div class="absolute inset-0 flex flex-col items-center justify-center p-4 text-center z-10">
+         <span class="text-[10px] font-bold tracking-[0.25em] uppercase border-b border-white/50 pb-1 mb-1 text-white/90 drop-shadow-sm">
+             FEATURED
+         </span>
+         
+         <div class="font-bold tracking-wide leading-tight text-white drop-shadow-lg font-sans text-2xl js-feature-title-overlay">
+             {selectedAd.overlayTitle || selectedAd.title}
+         </div>
+
+         <div class="w-6 h-1 bg-white/70 rounded-full mt-1 backdrop-blur-sm shadow-sm"></div>
+     </div>
+
+     {/* Top Right Badge (Matching SpotCard Position/Style) */}
+     <div class="absolute top-2 right-2 z-20 flex gap-1">
+        <span class="bg-black/40 backdrop-blur-sm text-stone-200 text-[10px] font-bold px-1.5 py-0.5 rounded border border-white/10 flex items-center">
+            Ad
+        </span>
+        <span class="bg-black/60 backdrop-blur-sm text-white text-xs font-bold px-2 py-1 rounded shadow-sm border border-white/10">
+          推薦
+        </span>
+     </div>
+  </div>
+
+  <div class="p-5 flex-1 flex flex-col justify-between">
+    <div>
+        <div class="flex gap-2 mb-3 js-feature-badges">
+             {selectedAd.badges.map(badge => (
+                <span class={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getBadgeClasses(badge.color)}`}>
+                    {badge.text}
+                </span>
+             ))}
+        </div>
+
+        <h3 class="font-bold text-xl text-stone-800 mb-2 group-hover:text-emerald-700 transition-colors js-feature-title">
+            {selectedAd.title}
+        </h3>
+        <p class="text-stone-600 text-sm line-clamp-2 mb-4 leading-relaxed js-feature-desc">
+            {selectedAd.desc}
+        </p>
+    </div>
+    
+    <div class="mt-auto">
+        <span class="w-full block text-center bg-stone-100 group-hover:bg-emerald-600 group-hover:text-white text-stone-600 text-sm font-bold py-2.5 rounded-lg transition-colors duration-300 js-feature-cta">
+            {selectedAd.cta}
+        </span>
+    </div>
+  </div>
+
+  <a href={selectedAd.link} target="_blank" rel="noopener nofollow sponsored" class="absolute inset-0 z-0 js-feature-link" aria-label={selectedAd.title} data-track-affiliate="native_ad" data-item-name={selectedAd.title}></a>
+</article>

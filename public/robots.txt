@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /
+
+# Sitemap
+Sitemap: https://www.outdoorfun.com.tw/sitemap-index.xml
